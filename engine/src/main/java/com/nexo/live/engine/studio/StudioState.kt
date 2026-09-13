@@ -12,6 +12,7 @@ import com.nexo.live.engine.model.Scene
 import com.nexo.live.engine.model.SceneItem
 import com.nexo.live.engine.model.Source
 import com.nexo.live.engine.model.StreamStats
+import com.nexo.live.engine.thermal.ThermalLevel
 
 data class StudioState(
     val canvas: CanvasConfig = CanvasConfig.HD_LANDSCAPE,
@@ -28,6 +29,9 @@ data class StudioState(
     val live: LiveStatus = LiveStatus.Offline,
     val record: RecordStatus = RecordStatus.Idle,
     val stats: StreamStats = StreamStats(),
+    val thermalLevel: ThermalLevel = ThermalLevel.None,
+    /** true si la protección térmica está recortando calidad ahora mismo. */
+    val thermalThrottled: Boolean = false,
 ) {
     val programScene: Scene? get() = scenes.firstOrNull { it.id == programSceneId }
     val previewScene: Scene? get() = scenes.firstOrNull { it.id == previewSceneId }

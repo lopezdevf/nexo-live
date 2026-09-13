@@ -7,15 +7,20 @@ emisión RTMP/SRT y grabación local. Android primero, en Kotlin.
 
 | Módulo    | Contenido |
 |-----------|-----------|
-| `:engine` | Modelo del estudio, controlador de estado, compositor GL, codificadores, salidas y servicio en primer plano. Sin Compose. |
-| `:app`    | UI en Jetpack Compose (mesa de control), tema Nexo, ViewModels. |
+| `:engine` | Modelo, `StudioEngine`, compositor GL, capturas, audio, codificadores, destinos, grabación, térmica y servicio en primer plano. Sin Compose. |
+| `:app`    | UI en Jetpack Compose (mesa de control, propiedades, ajustes), tema Nexo, ViewModels. |
+
+Paquetes de `:engine`: `model`, `studio` (estado y guardado), `render` + `gl` (compositor), `capture`
+(Camera2, UVC, pantalla), `audio`, `encode`, `output` (destinos, multistream, MP4), `devices`, `thermal`,
+`settings` y `service`.
 
 ## Flujo de datos
 
 ```mermaid
 flowchart LR
     subgraph Fuentes de vídeo
-        CAM[Cámara<br/>CameraX] --> TEX
+        CAM[Cámara<br/>Camera2 · externas] --> TEX
+        UVC[Webcam / capturadora<br/>UVC por USB] --> TEX
         SCR[Pantalla<br/>MediaProjection] --> TEX
         IMG[Imagen / Texto / Color] --> TEX
     end
@@ -24,10 +29,13 @@ flowchart LR
     COMP --> VENC[MediaCodec H.264/H.265]
 
     subgraph Fuentes de audio
-        MIC[Micrófono] --> MIX
+        MIC[Micrófono<br/>integrado · cable · USB · Bluetooth] --> MIX
         INT[Audio interno<br/>AudioPlaybackCapture] --> MIX
     end
-    MIX[Mezclador PCM<br/>ganancia · mute · vúmetros] --> AENC[MediaCodec AAC]
+    MIX[Mezclador PCM<br/>ganancia · balance · mute · vúmetros] --> AENC[MediaCodec AAC]
+    MIX --> MON[Monitorización<br/>audífonos]
+    THERM[ThermalGovernor] -. bitrate · fps · resolución .-> COMP
+    THERM -.-> VENC
 
     VENC --> RTMP[RTMP/RTMPS<br/>RootEncoder]
     VENC --> SRT[SRT<br/>RootEncoder]
@@ -51,6 +59,31 @@ en pantalla cambia lo que sale al aire sin capas intermedias.
   delegamos RTMP/SRT a una librería probada (Apache 2.0).
 - **Claves de retransmisión fuera del modelo**: `StreamDestination` no contiene la clave; `KeyVault`
   la cifra con AES-GCM y una llave de Android Keystore.
+- **Entrada por superficie**: el compositor dibuja directamente en la superficie de MediaCodec; no hay
+  copias de píxeles por CPU, que es lo que más calienta en apps de streaming.
+- **Solo se abre lo que se ve**: el compositor crea las capturas de las escenas visibles y cierra las que
+  llevan 5 s sin usarse, o todas si nadie mira la vista previa y no se emite.
+- **Temporizador propio en lugar de vsync**: con la pantalla apagada no hay vsync y el directo debe seguir.
+- **Un codificador para emitir y grabar**: la grabación reutiliza el vídeo codificado del directo.
+- **Reloj de audio propio**: el mezclador saca un bloque AAC (1024 muestras) exactamente cada 21,3 ms
+  y cada fuente llena su búfer circular; si una fuente se retrasa suena silencio en vez de desincronizar.
+
+## Protección térmica
+
+`ThermalMonitor` combina el aviso del sistema (`PowerManager`), el margen previsto
+(`getThermalHeadroom`, Android 11+) y la temperatura de la batería. `ThermalGovernor` (lógica pura con
+tests) decide el perfil: sube de nivel al instante y baja de uno en uno tras `recoverySeconds` más
+frío. `StudioEngine` aplica el perfil al bitrate del codificador, a los fps de salida y vista previa,
+a la escala del lienzo y al render doble del modo estudio; en emergencia detiene el directo y cierra la
+grabación antes de que Android mate la app.
+
+## Dispositivos
+
+`DeviceCatalog` enumera cámaras Camera2 (frontal, trasera, externa), cámaras UVC por USB, entradas y
+salidas de audio, y se actualiza al conectar o desconectar. Los dispositivos de audio se guardan por
+tipo, nombre y dirección (`AudioDeviceKey`) porque Android cambia su id en cada conexión. Los
+micrófonos Bluetooth usan el modo de llamada (calidad limitada, la UI lo avisa) y la monitorización
+prefiere audífonos con cable por latencia.
 
 ## Destinos y multistream
 
@@ -95,9 +128,10 @@ añadido posterior. Exige registrar una app de desarrollador en cada plataforma 
 1. **Esqueleto** ✅ — proyecto Gradle, modelo del estudio con tests y mesa de control en Compose
    (lienzo editable con gestos e imanes, escenas, capas, mezclador y modo estudio).
 2. **Destinos** ✅ — catálogo de plataformas, enlaces de conexión, claves cifradas, multistream y prueba de conexión.
-3. **Compositor GL** — hilo de render EGL, fuentes de cámara, color, texto e imagen, y vista previa real bajo la capa de edición.
-4. **Salida** — codificadores MediaCodec conectados a `MultiStreamer`, grabación MP4, servicio en primer plano,
-   bitrate adaptativo y estadísticas reales.
-5. **Gaming** — captura de pantalla, audio interno y vúmetros reales en el mezclador.
-6. **Persistencia** — colecciones de escenas y perfiles de salida.
-7. **Extras** — inicio de sesión OAuth por plataforma, transiciones animadas, chroma key/LUT y overlay de chat.
+3. **Compositor GL** ✅ — hilo de render EGL, cámaras, UVC, pantalla, color, texto e imagen, fundidos y vista previa real.
+4. **Salida** ✅ — codificadores MediaCodec conectados a `MultiStreamer`, grabación MP4, servicio en primer plano y
+   bitrate adaptativo.
+5. **Audio y dispositivos** ✅ — captura por dispositivo, audio interno, mezclador, vúmetros y monitorización.
+6. **Térmica, ajustes y guardado** ✅ — protección térmica real, ajustes completos y escenas persistentes.
+7. **Validación en dispositivos** — pruebas en varios fabricantes (rotación de cámaras, codificadores, UVC).
+8. **Extras** — inicio de sesión OAuth por plataforma, chroma key/LUT, overlay de chat y alertas.

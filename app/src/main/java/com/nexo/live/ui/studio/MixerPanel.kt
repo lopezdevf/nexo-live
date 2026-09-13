@@ -17,6 +17,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.Headphones
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -28,34 +30,51 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.dp
+import com.nexo.live.engine.devices.AudioDeviceEntry
+import com.nexo.live.engine.model.MonitoringMode
+import com.nexo.live.engine.model.Source
 import com.nexo.live.engine.model.kind
 import com.nexo.live.engine.studio.StudioController
 import com.nexo.live.engine.studio.StudioState
+import com.nexo.live.ui.destinations.Callout
 import com.nexo.live.ui.theme.Nexo
 import java.util.Locale
 
 @Composable
 fun MixerPanel(
     state: StudioState,
+    levels: Map<String, Float>,
+    errors: Map<String, String>,
+    inputs: List<AudioDeviceEntry>,
+    monitorStatus: String?,
     onGain: (String, Float) -> Unit,
     onToggleMute: (String) -> Unit,
+    onProperties: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (state.audio.isEmpty()) {
-        Text("No hay fuentes de audio. Añade un micrófono o el audio interno.", color = Nexo.colors.textLow, modifier = modifier.padding(16.dp))
+        Text("No hay fuentes de audio. Añade un micrófono o el audio interno desde Fuentes.", color = Nexo.colors.textLow, modifier = modifier.padding(16.dp))
         return
     }
     LazyColumn(modifier, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        monitorStatus?.let { status -> item { Callout(status, Nexo.colors.record) } }
         items(state.audio, key = { it.sourceId }) { channel ->
             val source = state.sources[channel.sourceId] ?: return@items
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(source.kind.icon, contentDescription = null, tint = Nexo.colors.textMid, modifier = Modifier.size(18.dp))
-                    Text(source.name, color = Nexo.colors.textHigh, modifier = Modifier.padding(start = 8.dp).weight(1f))
+                    Column(Modifier.padding(start = 8.dp).weight(1f)) {
+                        Text(source.name, color = Nexo.colors.textHigh, maxLines = 1)
+                        deviceLabel(source, inputs)?.let { Text(it, style = Nexo.numeric, color = Nexo.colors.textLow, maxLines = 1) }
+                    }
+                    if (channel.monitoring != MonitoringMode.Off) {
+                        Icon(Icons.Outlined.Headphones, "Monitorizado", tint = Nexo.colors.volt, modifier = Modifier.size(16.dp))
+                    }
                     Text(
                         if (channel.muted) "MUTE" else String.format(Locale.ROOT, "%+.1f dB", channel.gainDb),
                         style = Nexo.numeric,
                         color = if (channel.muted) Nexo.colors.live else Nexo.colors.textMid,
+                        modifier = Modifier.padding(start = 6.dp),
                     )
                     ToolButton(
                         if (channel.muted) Icons.AutoMirrored.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
@@ -63,9 +82,10 @@ fun MixerPanel(
                         { onToggleMute(channel.sourceId) },
                         tint = if (channel.muted) Nexo.colors.live else Nexo.colors.textMid,
                     )
+                    ToolButton(Icons.Outlined.Tune, "Ajustes de ${source.name}", { onProperties(channel.sourceId) })
                 }
-                // El nivel real lo publicará el mezclador de audio del motor (hito 3)
-                LevelMeter(level = 0f, muted = channel.muted, modifier = Modifier.fillMaxWidth().height(6.dp))
+                errors[channel.sourceId]?.let { Text(it, style = Nexo.numeric, color = Nexo.colors.record) }
+                LevelMeter(level = levels[channel.sourceId] ?: 0f, muted = channel.muted, modifier = Modifier.fillMaxWidth().height(6.dp))
                 Slider(
                     value = channel.gainDb,
                     onValueChange = { onGain(channel.sourceId, it) },
@@ -80,6 +100,12 @@ fun MixerPanel(
             }
         }
     }
+}
+
+private fun deviceLabel(source: Source, inputs: List<AudioDeviceEntry>): String? = when (source) {
+    is Source.Microphone -> source.device?.let { key -> inputs.firstOrNull { it.key == key }?.label ?: "Desconectado: ${key.productName}" } ?: "Micrófono predeterminado"
+    is Source.InternalAudio -> "Audio de juegos y apps"
+    else -> null
 }
 
 /** Vúmetro segmentado en tres zonas (verde < -20 dB, amarillo < -9 dB, rojo). */

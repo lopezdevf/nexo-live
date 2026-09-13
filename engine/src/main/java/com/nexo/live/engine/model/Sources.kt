@@ -20,6 +20,9 @@ sealed interface Source {
         val facing: Facing = Facing.Back,
         /** Id de Camera2 concreto; null elige la primera cámara con [facing]. */
         val cameraId: String? = null,
+        /** Giro extra que el usuario añade si su cámara sale torcida (0, 90, 180, 270). */
+        val rotationOffset: Int = 0,
+        val mirror: Boolean = false,
     ) : Source {
         override val hasVideo = true
         override val hasAudio = false
@@ -33,6 +36,8 @@ sealed interface Source {
         override val id: String,
         override val name: String,
         val deviceName: String? = null,
+        val rotationOffset: Int = 0,
+        val mirror: Boolean = false,
     ) : Source {
         override val hasVideo = true
         override val hasAudio = false
@@ -126,3 +131,14 @@ val Source.kind: SourceKind
         is Source.Microphone -> SourceKind.Microphone
         is Source.InternalAudio -> SourceKind.InternalAudio
     }
+
+fun Source.renamed(name: String): Source = when (this) {
+    is Source.Camera -> copy(name = name)
+    is Source.UsbCamera -> copy(name = name)
+    is Source.Screen -> copy(name = name)
+    is Source.Image -> copy(name = name)
+    is Source.Text -> copy(name = name)
+    is Source.SolidColor -> copy(name = name)
+    is Source.Microphone -> copy(name = name)
+    is Source.InternalAudio -> copy(name = name)
+}

@@ -11,7 +11,7 @@ import com.nexo.live.engine.model.Transform
 fun StudioController.seedDefaultStudio() {
     if (state.value.scenes.isNotEmpty()) return
 
-    val gaming = addScene("Juego")
+    addScene("Juego")
     addSource(Source.Screen(id = "screen", name = "Pantalla"))
     addSource(
         Source.Camera(id = "cam-front", name = "Cámara frontal", facing = Facing.Front),
@@ -20,7 +20,7 @@ fun StudioController.seedDefaultStudio() {
     addSource(Source.Microphone(id = "mic", name = "Micrófono"))
     addSource(Source.InternalAudio(id = "internal", name = "Audio del juego"))
 
-    addScene("Cámara").also { selectScene(it) }
+    val camera = addScene("Cámara").also { selectScene(it) }
     addSource(Source.Camera(id = "cam-back", name = "Cámara trasera", facing = Facing.Back))
     addSource(
         Source.Text(id = "title", name = "Título", text = "En directo con Nexo Live", backgroundArgb = 0x99000000),
@@ -34,6 +34,7 @@ fun StudioController.seedDefaultStudio() {
         Transform(x = 0.25f, y = 0.42f, width = 0.5f, height = 0.16f),
     )
 
-    selectScene(gaming)
+    // Se arranca en la escena de cámara: funciona con solo aceptar permisos, sin captura de pantalla
+    selectScene(camera)
     selectItem(null)
 }

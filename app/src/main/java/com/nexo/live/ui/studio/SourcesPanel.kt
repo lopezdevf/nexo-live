@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.LockOpen
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.DropdownMenu
@@ -42,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import com.nexo.live.engine.model.SourceKind
 import com.nexo.live.engine.model.kind
 import com.nexo.live.engine.studio.StudioState
+import com.nexo.live.ui.destinations.Callout
+import com.nexo.live.ui.destinations.PrimaryAction
 import com.nexo.live.ui.theme.Nexo
 
 @Composable
@@ -54,6 +57,9 @@ fun SourcesPanel(
     onRaise: (String) -> Unit,
     onLower: (String) -> Unit,
     onRemove: (String) -> Unit,
+    onProperties: (String) -> Unit,
+    needsScreenCapture: Boolean,
+    onRequestScreenCapture: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -79,6 +85,14 @@ fun SourcesPanel(
                         )
                     }
                 }
+            }
+        }
+
+        if (needsScreenCapture) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                Callout("La pantalla o el audio interno necesitan permiso de captura.", Nexo.colors.record)
+                Spacer(Modifier.height(6.dp))
+                PrimaryAction("PERMITIR CAPTURA DE PANTALLA", onRequestScreenCapture)
             }
         }
 
@@ -114,6 +128,7 @@ fun SourcesPanel(
                         modifier = Modifier.padding(start = 10.dp).weight(1f),
                     )
                     if (selected) {
+                        ToolButton(Icons.Outlined.Tune, "Propiedades de ${source.name}", { onProperties(source.id) }, tint = Nexo.colors.volt)
                         ToolButton(Icons.Outlined.KeyboardArrowUp, "Subir capa", { onRaise(item.id) })
                         ToolButton(Icons.Outlined.KeyboardArrowDown, "Bajar capa", { onLower(item.id) })
                         ToolButton(Icons.Outlined.DeleteOutline, "Quitar de la escena", { onRemove(item.id) })

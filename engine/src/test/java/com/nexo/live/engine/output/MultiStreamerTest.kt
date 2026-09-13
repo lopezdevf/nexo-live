@@ -26,6 +26,7 @@ class MultiStreamerTest {
         override fun disconnect() { disconnects++ }
         override fun shouldRetry(reason: String) = retriesLeft-- > 0
         override fun reconnect(delayMs: Long) { reconnectDelays += delayMs }
+        override fun hasCongestion() = false
         override fun setVideoInfo(sps: ByteBuffer, pps: ByteBuffer?, vps: ByteBuffer?) = Unit
         override fun sendVideo(buffer: ByteBuffer, info: MediaCodec.BufferInfo) = Unit
         override fun sendAudio(buffer: ByteBuffer, info: MediaCodec.BufferInfo) = Unit

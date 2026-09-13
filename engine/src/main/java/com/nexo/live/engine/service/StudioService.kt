@@ -10,36 +10,49 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import androidx.lifecycle.LifecycleService
+import com.nexo.live.engine.StudioEngineHost
 
 /**
- * Servicio en primer plano que mantiene el directo o la grabación cuando la app
- * pasa a segundo plano (por ejemplo, al abrir un juego).
+ * Servicio en primer plano que mantiene el directo o la grabación cuando la app pasa a segundo
+ * plano (por ejemplo, al abrir un juego).
  *
- * Android 14+ exige declarar qué usa: solo se piden los tipos de las fuentes activas,
- * y mediaProjection únicamente después de que el usuario haya aceptado capturar la pantalla.
+ * Android 14+ exige declarar qué usa: solo se piden los tipos de las fuentes activas, y el permiso
+ * de captura de pantalla se entrega al motor después de iniciar el servicio con ese tipo.
  */
 class StudioService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        when (intent?.action) {
-            ACTION_STOP -> {
-                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }
-            else -> {
-                val types = intent?.getIntExtra(EXTRA_TYPES, 0) ?: 0
-                if (types == 0) {
-                    // Android 14+ rechaza un servicio en primer plano sin tipo
-                    stopSelf()
-                    return START_NOT_STICKY
-                }
-                ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(), types)
-            }
+        if (intent?.action == ACTION_STOP) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        val types = intent?.getIntExtra(EXTRA_TYPES, 0) ?: 0
+        if (types == 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Android 14+ rechaza un servicio en primer plano sin tipo
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(), types)
+        } catch (e: Exception) {
+            // Sin permisos del tipo pedido (p. ej. cámara revocada): no se puede seguir en segundo plano
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        val resultData = intent?.let { IntentCompat.getParcelableExtra(it, EXTRA_PROJECTION_DATA, Intent::class.java) }
+        if (resultData != null) {
+            val resultCode = intent.getIntExtra(EXTRA_PROJECTION_CODE, 0)
+            (application as? StudioEngineHost)?.engine?.onScreenCapturePermission(resultCode, resultData)
         }
         return START_NOT_STICKY
     }
@@ -69,18 +82,34 @@ class StudioService : LifecycleService() {
         private const val NOTIFICATION_ID = 7001
         private const val ACTION_STOP = "com.nexo.live.STOP_STUDIO"
         private const val EXTRA_TYPES = "types"
+        private const val EXTRA_PROJECTION_CODE = "projection_code"
+        private const val EXTRA_PROJECTION_DATA = "projection_data"
 
         fun start(context: Context, camera: Boolean, microphone: Boolean, screen: Boolean) {
-            var types = 0
-            if (camera) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            if (microphone) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            if (screen) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            val intent = Intent(context, StudioService::class.java).putExtra(EXTRA_TYPES, types)
+            val intent = Intent(context, StudioService::class.java).putExtra(EXTRA_TYPES, types(camera, microphone, screen))
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        /** Inicia el servicio con tipo mediaProjection y le pasa el permiso de captura recién concedido. */
+        fun startWithScreenCapture(context: Context, resultCode: Int, data: Intent, camera: Boolean, microphone: Boolean) {
+            val intent = Intent(context, StudioService::class.java)
+                .putExtra(EXTRA_TYPES, types(camera, microphone, screen = true))
+                .putExtra(EXTRA_PROJECTION_CODE, resultCode)
+                .putExtra(EXTRA_PROJECTION_DATA, data)
             ContextCompat.startForegroundService(context, intent)
         }
 
         fun stop(context: Context) {
             context.startService(Intent(context, StudioService::class.java).setAction(ACTION_STOP))
+        }
+
+        private fun types(camera: Boolean, microphone: Boolean, screen: Boolean): Int {
+            var types = 0
+            // Los tipos cámara y micrófono existen desde Android 11; antes no hacen falta
+            if (camera && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            if (microphone && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            if (screen) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            return types
         }
     }
 }

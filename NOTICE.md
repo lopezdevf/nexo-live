@@ -19,9 +19,10 @@ reutilizarse bajo GPLv2 en proyectos que no incluyan esas dependencias.
 
 | Biblioteca | Licencia | Uso |
 |------------|----------|-----|
-| [AndroidX / Jetpack Compose / CameraX](https://developer.android.com/jetpack/androidx) | Apache 2.0 | Interfaz, ciclo de vida, cámara |
+| [AndroidX / Jetpack Compose](https://developer.android.com/jetpack/androidx) | Apache 2.0 | Interfaz y ciclo de vida |
 | [Kotlin y kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines) | Apache 2.0 | Lenguaje y concurrencia |
 | [RootEncoder](https://github.com/pedroSG94/RootEncoder) | Apache 2.0 | Protocolos RTMP, RTMPS y SRT |
+| [UVCAndroid](https://github.com/shiyinghan/UVCAndroid) | Apache 2.0 (incluye libuvc, BSD-3-Clause, y libusb, LGPL-2.1) | Webcams y capturadoras HDMI por USB (UVC) |
 
 Los servidores de ingest del catálogo de plataformas se contrastaron con la lista pública de servicios de
 [OBS Studio](https://github.com/obsproject/obs-studio) y la API de ingest de Twitch; son datos de conexión,

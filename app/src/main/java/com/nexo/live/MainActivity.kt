@@ -3,11 +3,14 @@
 
 package com.nexo.live
 
+import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import com.nexo.live.ui.destinations.DestinationsViewModel
 import com.nexo.live.ui.studio.StudioScreen
@@ -16,23 +19,26 @@ import com.nexo.live.ui.theme.NexoTheme
 
 class MainActivity : ComponentActivity() {
 
-    private val app get() = application as NexoApp
+    private val engine get() = (application as NexoApp).engine
 
-    private val studioViewModel: StudioViewModel by viewModels {
-        StudioViewModel.factory(app.studio)
-    }
+    private val studioViewModel: StudioViewModel by viewModels { StudioViewModel.factory(application as NexoApp) }
 
-    private val destinationsViewModel: DestinationsViewModel by viewModels {
-        DestinationsViewModel.factory(app.studio, app.destinations, app.streamer)
+    private val destinationsViewModel: DestinationsViewModel by viewModels { DestinationsViewModel.factory(engine) }
+
+    private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        studioViewModel.onPermissionsResult(granted)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        if (savedInstanceState == null) handleConnectionLink(intent)
+        if (savedInstanceState == null) {
+            handleConnectionLink(intent)
+            permissions.launch(requiredPermissions())
+        }
         setContent {
             NexoTheme {
-                StudioScreen(studioViewModel, destinationsViewModel)
+                StudioScreen(studioViewModel, destinationsViewModel, onRequestPermissions = { permissions.launch(requiredPermissions()) })
             }
         }
     }
@@ -54,4 +60,12 @@ class MainActivity : ComponentActivity() {
         } ?: return
         destinationsViewModel.handleIncomingText(text)
     }
+
+    private fun requiredPermissions(): Array<String> = buildList {
+        add(Manifest.permission.CAMERA)
+        add(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+        // Nombres de audífonos y micrófonos Bluetooth
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) add(Manifest.permission.BLUETOOTH_CONNECT)
+    }.toTypedArray()
 }

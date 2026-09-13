@@ -8,9 +8,9 @@ pensado desde cero para el móvil.
 [![Licencia: GPL v2+](https://img.shields.io/badge/licencia-GPL--2.0--or--later-blue.svg)](#licencia)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/lopezdevf?label=Apoyar)](https://github.com/sponsors/lopezdevf)
 
-> **Estado:** en desarrollo activo. La mesa de control y los destinos ya funcionan, y la lógica del
-> control térmico y del mezclador está lista y probada. El compositor de vídeo, la captura y la emisión
-> real están en marcha (ver [hoja de ruta](#hoja-de-ruta)).
+> **Estado:** alfa. Todo el flujo (compositor OpenGL, captura, codificación, emisión, grabación, audio y
+> control térmico) está implementado, compila y pasa sus tests, pero **aún no se ha probado en muchos
+> móviles reales**. Si lo pruebas, cuéntanos cómo va en *issues*.
 
 ## Características
 
@@ -66,13 +66,15 @@ La arquitectura está explicada en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
 
 ## Hoja de ruta
 
-- [x] Mesa de control: escenas, capas, lienzo editable con gestos, modo estudio
+- [x] Mesa de control: escenas, capas, lienzo editable con gestos, modo estudio con fundido
 - [x] Destinos: 15 plataformas, enlaces de conexión, claves cifradas, multistream, prueba de conexión
-- [x] Control térmico y mezclador de audio (lógica y tests)
-- [ ] Compositor OpenGL con cámaras, cámaras USB, pantalla, imagen y texto
-- [ ] Codificadores, emisión real y grabación MP4
-- [ ] Captura de audio por dispositivo y monitorización por audífonos
-- [ ] Ajustes completos y propiedades de cada fuente
+- [x] Compositor OpenGL: cámaras (incluidas externas), cámaras USB/capturadoras UVC, pantalla, imagen y texto
+- [x] Codificación por hardware H.264/H.265, emisión RTMP/SRT, grabación MP4 y bitrate adaptativo
+- [x] Audio por dispositivo (integrado, cable, USB, Bluetooth), audio interno, mezclador y monitorización
+- [x] Control térmico real (estado del sistema, margen previsto y batería)
+- [x] Ajustes completos, propiedades de cada fuente y escenas guardadas entre sesiones
+- [ ] Pruebas en una variedad de móviles y ajuste de la rotación de cámaras por fabricante
+- [ ] Filtros (chroma key, LUT), overlay de chat y alertas
 - [ ] Inicio de sesión con cuenta por plataforma (OAuth)
 
 ## Apoyar el proyecto

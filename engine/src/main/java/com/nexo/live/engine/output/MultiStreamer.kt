@@ -80,6 +80,9 @@ class MultiStreamer(
         liveSessions.values.forEach { if (it.connected) it.sink.sendVideo(buffer.duplicate(), info) }
     }
 
+    /** Algún destino al aire no da abasto: conviene bajar el bitrate. */
+    fun anyCongested(): Boolean = liveSessions.values.any { it.connected && it.sink.hasCongestion() }
+
     fun sendAudio(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
         liveSessions.values.forEach { if (it.connected) it.sink.sendAudio(buffer.duplicate(), info) }
     }

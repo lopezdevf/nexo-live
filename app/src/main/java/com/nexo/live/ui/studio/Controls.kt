@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.Thermostat
 import androidx.compose.material.icons.outlined.ViewColumn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -37,11 +39,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexo.live.engine.model.LiveStatus
 import com.nexo.live.engine.studio.StudioState
+import com.nexo.live.engine.thermal.ThermalLevel
+import com.nexo.live.ui.settings.label
+import java.util.Locale
 import com.nexo.live.ui.theme.Nexo
 
 /** Franja superior: estado de emisión y telemetría, siempre legible de un vistazo. */
 @Composable
-fun StatusStrip(state: StudioState, compact: Boolean, modifier: Modifier = Modifier) {
+fun StatusStrip(state: StudioState, compact: Boolean, onSettings: () -> Unit, modifier: Modifier = Modifier) {
     val c = Nexo.colors
     Row(
         modifier
@@ -65,12 +70,30 @@ fun StatusStrip(state: StudioState, compact: Boolean, modifier: Modifier = Modif
         )
         if (state.isRecording) StatusBadge("REC", c.record, pulsing = true)
         Box(Modifier.weight(1f))
-        if (!compact) {
-            Metric("${state.canvas.width}×${state.canvas.height}")
-            Metric("${state.canvas.fps} fps")
+        if (!compact) Metric("${state.canvas.width}×${state.canvas.height}")
+        Metric(String.format(Locale.ROOT, "%.0f/%d fps", state.stats.fps, state.canvas.fps), warn = state.stats.fps > 0 && state.stats.fps < state.canvas.fps * 0.8f)
+        if (state.isLive) Metric("${state.stats.bitrateKbps} kbps")
+        ThermalBadge(state)
+        Box(Modifier.size(32.dp).clickable(onClickLabel = "Ajustes", onClick = onSettings), contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.Settings, contentDescription = "Ajustes", tint = c.textMid, modifier = Modifier.size(18.dp))
         }
-        Metric("${state.stats.bitrateKbps} kbps")
-        Metric("${state.stats.droppedFrames} perdidos", warn = state.stats.droppedFrames > 0)
+    }
+}
+
+/** Termómetro: solo aparece cuando el móvil se calienta, con color según el nivel. */
+@Composable
+private fun ThermalBadge(state: StudioState) {
+    val level = state.thermalLevel
+    if (level == ThermalLevel.None) return
+    val color = when (level) {
+        ThermalLevel.Light -> Nexo.colors.meterMid
+        ThermalLevel.Moderate -> Nexo.colors.record
+        else -> Nexo.colors.live
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.Thermostat, contentDescription = "Temperatura", tint = color, modifier = Modifier.size(16.dp))
+        Text(level.label.uppercase(), style = Nexo.panelLabel, color = color)
+        if (state.thermalThrottled) Text(" · AHORRO", style = Nexo.panelLabel, color = color)
     }
 }
 

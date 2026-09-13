@@ -5,11 +5,15 @@ package com.nexo.live.engine.studio
 
 import com.nexo.live.engine.model.AudioChannel
 import com.nexo.live.engine.model.CanvasConfig
+import com.nexo.live.engine.model.EncoderConfig
 import com.nexo.live.engine.model.LiveStatus
+import com.nexo.live.engine.model.RecordStatus
+import com.nexo.live.engine.thermal.ThermalLevel
 import com.nexo.live.engine.model.Scene
 import com.nexo.live.engine.model.SceneItem
 import com.nexo.live.engine.model.Source
 import com.nexo.live.engine.model.Transform
+import com.nexo.live.engine.model.renamed
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -144,6 +148,39 @@ class StudioController(
 
     fun setLive(status: LiveStatus, bitrateKbps: Int = 0) = _state.update {
         it.copy(live = status, stats = it.stats.copy(bitrateKbps = bitrateKbps))
+    }
+
+    fun setEncoder(encoder: EncoderConfig) = _state.update { if (it.encoder == encoder) it else it.copy(encoder = encoder) }
+
+    fun setRecord(status: RecordStatus) = _state.update { it.copy(record = status) }
+
+    fun setThermal(level: ThermalLevel, throttled: Boolean) = _state.update {
+        if (it.thermalLevel == level && it.thermalThrottled == throttled) it else it.copy(thermalLevel = level, thermalThrottled = throttled)
+    }
+
+    fun setStats(fps: Float, droppedFrames: Long) = _state.update {
+        it.copy(stats = it.stats.copy(fps = fps, droppedFrames = droppedFrames))
+    }
+
+    // ---- Propiedades de fuentes -----------------------------------------------------------
+
+    fun renameSource(sourceId: String, name: String) = _state.update { s ->
+        val source = s.sources[sourceId] ?: return@update s
+        s.copy(sources = s.sources + (sourceId to source.renamed(name.ifBlank { source.name })))
+    }
+
+    fun setChannel(channel: AudioChannel) = _state.update { s ->
+        s.copy(audio = s.audio.map { if (it.sourceId == channel.sourceId) channel.copy(gainDb = channel.gainDb.coerceIn(MIN_GAIN_DB, MAX_GAIN_DB)) else it })
+    }
+
+    /** Borra la fuente del estudio entero: de todas las escenas y del mezclador. */
+    fun deleteSource(sourceId: String) = _state.update { s ->
+        s.copy(
+            sources = s.sources - sourceId,
+            scenes = s.scenes.map { scene -> scene.copy(items = scene.items.filterNot { it.sourceId == sourceId }) },
+            audio = s.audio.filterNot { it.sourceId == sourceId },
+            selectedItemId = s.selectedItemId.takeIf { id -> s.editingScene?.items?.any { it.id == id && it.sourceId != sourceId } == true },
+        )
     }
 
     // ---- Internos -----------------------------------------------------------

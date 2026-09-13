@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.nexo.live.engine.StudioEngine
 import com.nexo.live.engine.model.CanvasOrientation
 import com.nexo.live.engine.model.DestinationStatus
 import com.nexo.live.engine.model.StreamDestination
@@ -69,11 +70,11 @@ data class EditorState(
     val hostMismatch: Boolean get() = server.isNotBlank() && ConnectionLink.hostMismatch(server, platform)
 }
 
-class DestinationsViewModel(
-    private val studio: StudioController,
-    private val repository: DestinationRepository,
-    private val streamer: MultiStreamer,
-) : ViewModel() {
+class DestinationsViewModel(private val engine: StudioEngine) : ViewModel() {
+
+    private val studio: StudioController = engine.studio
+    private val repository: DestinationRepository = engine.destinations
+    private val streamer: MultiStreamer = engine.streamer
 
     val ui: StateFlow<DestinationsUi> = combine(
         repository.destinations, streamer.live, streamer.tests, studio.state,
@@ -103,14 +104,6 @@ class DestinationsViewModel(
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
 
-    init {
-        // La franja superior refleja el estado combinado de todos los destinos
-        viewModelScope.launch {
-            streamer.live.collect { statuses ->
-                studio.setLive(MultiStreamer.aggregate(statuses.values), MultiStreamer.totalBitrateKbps(statuses.values))
-            }
-        }
-    }
 
     fun consumeNotice() { _notice.value = null }
 
@@ -135,15 +128,19 @@ class DestinationsViewModel(
         }
     }
 
-    /** false si no hay destinos activos (la pantalla abre la pestaña de destinos). */
+    /** Emite o termina. false si no hay destinos activos (la pantalla abre la pestaña de destinos). */
     fun goLive(): Boolean {
-        val count = ui.value.enabledCount
-        if (count == 0) {
+        if (engine.isStreaming) {
+            viewModelScope.launch(Dispatchers.Default) { engine.stopStreaming() }
+            return true
+        }
+        if (ui.value.enabledCount == 0) {
             _notice.value = "Añade o activa al menos un destino para emitir."
             return false
         }
-        _notice.value = "Listo para emitir a $count ${if (count == 1) "destino" else "destinos"}. " +
-            "El envío de vídeo llega con el compositor (hitos 2-3); de momento usa «Probar conexión»."
+        viewModelScope.launch(Dispatchers.Default) {
+            engine.startStreaming()?.let { _notice.value = it }
+        }
         return true
     }
 
@@ -302,7 +299,7 @@ class DestinationsViewModel(
     companion object {
         fun formatMbps(kbps: Int): String = String.format(Locale.ROOT, "%.1f Mbps", kbps / 1000f)
 
-        fun factory(studio: StudioController, repository: DestinationRepository, streamer: MultiStreamer): ViewModelProvider.Factory =
-            viewModelFactory { initializer { DestinationsViewModel(studio, repository, streamer) } }
+        fun factory(engine: StudioEngine): ViewModelProvider.Factory =
+            viewModelFactory { initializer { DestinationsViewModel(engine) } }
     }
 }

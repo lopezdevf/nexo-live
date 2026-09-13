@@ -296,12 +296,12 @@ private fun rememberPaste(): ((String) -> Unit) -> Unit {
 }
 
 @Composable
-private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+internal fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(text, style = Nexo.panelLabel, color = Nexo.colors.textLow, modifier = modifier)
 }
 
 @Composable
-private fun NexoField(
+internal fun NexoField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
@@ -310,13 +310,15 @@ private fun NexoField(
     keyboardType: KeyboardType = KeyboardType.Text,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     trailing: (@Composable () -> Unit)? = null,
+    singleLine: Boolean = true,
 ) {
     val c = Nexo.colors
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
-        singleLine = true,
+        singleLine = singleLine,
+        minLines = if (singleLine) 1 else 3,
         isError = error != null,
         supportingText = if (error != null) { { Text(error) } } else null,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType, autoCorrectEnabled = false),
@@ -339,7 +341,7 @@ private fun NexoField(
 }
 
 @Composable
-private fun ChoiceRow(selected: Boolean, title: String, subtitle: String?, onClick: () -> Unit) {
+internal fun ChoiceRow(selected: Boolean, title: String, subtitle: String?, onClick: () -> Unit) {
     val shape = RoundedCornerShape(Nexo.metrics.radiusSmall)
     Row(
         Modifier
@@ -362,7 +364,7 @@ private fun ChoiceRow(selected: Boolean, title: String, subtitle: String?, onCli
 }
 
 @Composable
-private fun Callout(text: String, color: Color) {
+internal fun Callout(text: String, color: Color) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -376,7 +378,7 @@ private fun Callout(text: String, color: Color) {
 }
 
 @Composable
-private fun PrimaryAction(label: String, onClick: () -> Unit) {
+internal fun PrimaryAction(label: String, onClick: () -> Unit) {
     Text(
         label,
         style = Nexo.panelLabel,

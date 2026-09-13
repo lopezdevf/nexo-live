@@ -3,6 +3,8 @@
 
 package com.nexo.live.ui.studio
 
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -19,32 +21,34 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.nexo.live.engine.capture.CaptureStatus
 import com.nexo.live.engine.model.CanvasConfig
 import com.nexo.live.engine.model.Scene
 import com.nexo.live.engine.model.SceneItem
 import com.nexo.live.engine.model.Source
 import com.nexo.live.engine.model.Transform
 import com.nexo.live.engine.model.kind
+import com.nexo.live.engine.render.PreviewSlot
 import com.nexo.live.ui.theme.Nexo
 import kotlin.math.abs
 
 /**
- * Lienzo editable. Hoy pinta marcadores de cada fuente; cuando llegue el compositor
- * OpenGL, su superficie irá debajo y esta capa quedará solo para selección y gestos.
+ * Lienzo editable: la imagen real la pinta el compositor OpenGL en un SurfaceView y encima va
+ * la capa de selección, gestos y avisos de cada fuente.
  */
 @Composable
 fun PreviewCanvas(
@@ -52,10 +56,14 @@ fun PreviewCanvas(
     scene: Scene?,
     sources: Map<String, Source>,
     selectedItemId: String?,
+    slot: PreviewSlot,
+    sourceStatus: Map<String, CaptureStatus>,
+    onSurface: (PreviewSlot, android.view.Surface?, Int, Int) -> Unit,
     onSelect: (String?) -> Unit,
     onTransform: (String, Transform) -> Unit,
     modifier: Modifier = Modifier,
     frameColor: Color = Nexo.colors.line,
+    editable: Boolean = true,
 ) {
     val items = scene?.items.orEmpty()
     val currentItems by rememberUpdatedState(items)
@@ -75,64 +83,87 @@ fun PreviewCanvas(
             val widthPx = constraints.maxWidth.toFloat()
             val heightPx = constraints.maxHeight.toFloat()
 
+            EngineSurface(slot, onSurface, Modifier.fillMaxSize())
+
             Box(
                 Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures { tap ->
-                            val nx = tap.x / size.width
-                            val ny = tap.y / size.height
-                            val hit = currentItems.lastOrNull { it.visible && it.transform.contains(nx, ny) }
-                            select(hit?.id)
-                        }
-                    }
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan: Offset, zoom, _ ->
-                            val item = currentSelected ?: return@detectTransformGestures
-                            if (item.locked) return@detectTransformGestures
-                            transform(item.id, tracker.next(item, zoom, pan.x / size.width, pan.y / size.height))
-                        }
-                    }
+                    .then(
+                        if (!editable) Modifier else Modifier
+                            .pointerInput(Unit) {
+                                detectTapGestures { tap ->
+                                    val nx = tap.x / size.width
+                                    val ny = tap.y / size.height
+                                    val hit = currentItems.lastOrNull { it.visible && it.transform.contains(nx, ny) }
+                                    select(hit?.id)
+                                }
+                            }
+                            .pointerInput(Unit) {
+                                detectTransformGestures { _, pan: Offset, zoom, _ ->
+                                    val item = currentSelected ?: return@detectTransformGestures
+                                    if (item.locked) return@detectTransformGestures
+                                    transform(item.id, tracker.next(item, zoom, pan.x / size.width, pan.y / size.height))
+                                }
+                            }
+                    )
             ) {
                 items.forEach { item ->
                     val source = sources[item.sourceId] ?: return@forEach
-                    if (item.visible && source.hasVideo) {
-                        SceneItemView(item, source, widthPx, heightPx)
+                    val status = sourceStatus[item.sourceId]
+                    if (item.visible && source.hasVideo && status !is CaptureStatus.Running && status != null) {
+                        StatusBadgeOverlay(item, source, status, widthPx, heightPx)
                     }
                 }
-                currentSelected?.let { SelectionFrame(it, widthPx, heightPx) }
+                if (editable) currentSelected?.let { SelectionFrame(it, widthPx, heightPx) }
             }
         }
     }
 }
 
+/** SurfaceView donde dibuja el compositor; avisa al motor al crearse, cambiar o destruirse. */
 @Composable
-private fun SceneItemView(item: SceneItem, source: Source, widthPx: Float, heightPx: Float) {
-    val t = item.transform
-    val density = LocalDensity.current
-    val itemModifier = with(density) {
-        Modifier
-            .offset(x = (t.x * widthPx).toDp(), y = (t.y * heightPx).toDp())
-            .size(width = (t.width * widthPx).toDp(), height = (t.height * heightPx).toDp())
-            .alpha(t.opacity)
-    }
-    when (source) {
-        is Source.SolidColor -> Box(itemModifier.background(Color(source.argb)))
-        is Source.Text -> Box(itemModifier.background(Color(source.backgroundArgb)), contentAlignment = Alignment.Center) {
-            val fontSize = with(density) { (t.height * heightPx * 0.45f).toSp() }
-            Text(
-                source.text,
-                color = Color(source.colorArgb),
-                fontSize = fontSize,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-            )
+private fun EngineSurface(slot: PreviewSlot, onSurface: (PreviewSlot, android.view.Surface?, Int, Int) -> Unit, modifier: Modifier) {
+    val callback by rememberUpdatedState(onSurface)
+    val holderCallback = remember(slot) {
+        object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) = Unit
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) =
+                callback(slot, holder.surface, width, height)
+            override fun surfaceDestroyed(holder: SurfaceHolder) = callback(slot, null, 0, 0)
         }
-        else -> Box(itemModifier.background(source.kind.placeholderTint), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(source.kind.icon, contentDescription = null, tint = Color.White.copy(alpha = 0.7f))
-                Text(source.name, color = Color.White.copy(alpha = 0.7f), style = Nexo.numeric, maxLines = 1)
+    }
+    DisposableEffect(slot) {
+        onDispose { callback(slot, null, 0, 0) }
+    }
+    AndroidView(
+        factory = { context -> SurfaceView(context).apply { holder.addCallback(holderCallback) } },
+        onRelease = { it.holder.removeCallback(holderCallback) },
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun StatusBadgeOverlay(item: SceneItem, source: Source, status: CaptureStatus, widthPx: Float, heightPx: Float) {
+    val t = item.transform
+    val message = when (status) {
+        CaptureStatus.Starting -> "Iniciando ${source.name}…"
+        is CaptureStatus.Error -> status.message
+        CaptureStatus.Running -> return
+    }
+    with(LocalDensity.current) {
+        Box(
+            Modifier
+                .offset(x = (t.x * widthPx).toDp(), y = (t.y * heightPx).toDp())
+                .size(width = (t.width * widthPx).toDp(), height = (t.height * heightPx).toDp())
+                .padding(8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier.background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(6.dp)).padding(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(source.kind.icon, contentDescription = null, tint = if (status is CaptureStatus.Error) Nexo.colors.record else Color.White)
+                Text(message, color = Color.White, style = Nexo.numeric, textAlign = TextAlign.Center)
             }
         }
     }

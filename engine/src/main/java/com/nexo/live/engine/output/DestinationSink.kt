@@ -34,6 +34,8 @@ interface DestinationSink {
     fun disconnect()
     fun shouldRetry(reason: String): Boolean
     fun reconnect(delayMs: Long)
+    /** true si la cola de envío se llena: la red no da para el bitrate actual. */
+    fun hasCongestion(): Boolean
     fun setVideoInfo(sps: ByteBuffer, pps: ByteBuffer?, vps: ByteBuffer?)
     fun sendVideo(buffer: ByteBuffer, info: MediaCodec.BufferInfo)
     fun sendAudio(buffer: ByteBuffer, info: MediaCodec.BufferInfo)
@@ -61,6 +63,7 @@ private class RtmpSink(listener: SinkListener) : DestinationSink {
     override fun disconnect() = client.disconnect()
     override fun shouldRetry(reason: String) = client.shouldRetry(reason)
     override fun reconnect(delayMs: Long) = client.reConnect(delayMs)
+    override fun hasCongestion() = runCatching { client.hasCongestion() }.getOrDefault(false)
     override fun setVideoInfo(sps: ByteBuffer, pps: ByteBuffer?, vps: ByteBuffer?) = client.setVideoInfo(sps, pps, vps)
     override fun sendVideo(buffer: ByteBuffer, info: MediaCodec.BufferInfo) = client.sendVideo(buffer, info)
     override fun sendAudio(buffer: ByteBuffer, info: MediaCodec.BufferInfo) = client.sendAudio(buffer, info)
@@ -78,6 +81,7 @@ private class SrtSink(listener: SinkListener) : DestinationSink {
     override fun disconnect() = client.disconnect()
     override fun shouldRetry(reason: String) = client.shouldRetry(reason)
     override fun reconnect(delayMs: Long) = client.reConnect(delayMs)
+    override fun hasCongestion() = runCatching { client.hasCongestion() }.getOrDefault(false)
     override fun setVideoInfo(sps: ByteBuffer, pps: ByteBuffer?, vps: ByteBuffer?) = client.setVideoInfo(sps, pps, vps)
     override fun sendVideo(buffer: ByteBuffer, info: MediaCodec.BufferInfo) = client.sendVideo(buffer, info)
     override fun sendAudio(buffer: ByteBuffer, info: MediaCodec.BufferInfo) = client.sendAudio(buffer, info)

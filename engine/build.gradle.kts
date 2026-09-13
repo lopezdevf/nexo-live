@@ -25,10 +25,9 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.androidx.camera.camera2)
-    implementation(libs.androidx.camera.lifecycle)
     implementation(libs.rootencoder.rtmp)
     implementation(libs.rootencoder.srt)
+    implementation(libs.uvc.android)
 
     testImplementation(libs.junit)
 }
