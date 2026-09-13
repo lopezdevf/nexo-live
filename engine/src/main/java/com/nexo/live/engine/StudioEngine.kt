@@ -20,6 +20,7 @@ import com.nexo.live.engine.encode.AudioEncoderListener
 import com.nexo.live.engine.encode.VideoEncoder
 import com.nexo.live.engine.encode.VideoEncoderConfig
 import com.nexo.live.engine.encode.VideoEncoderListener
+import com.nexo.live.engine.model.CanvasConfig
 import com.nexo.live.engine.model.RecordStatus
 import com.nexo.live.engine.model.Source
 import com.nexo.live.engine.model.VideoCodecChoice
@@ -82,7 +83,7 @@ class StudioEngine(
 
     val projection = ScreenProjection(appContext)
 
-    val compositor = Compositor(studio, settings.settings, CaptureFactory { source, longSide, fps -> createCapture(source, longSide, fps) })
+    val compositor = Compositor(studio, settings.settings, CaptureFactory { source, canvas -> createCapture(source, canvas) })
 
     val audio = AudioEngine(appContext, studio, devices, settings.settings) { projectionHandle() }
 
@@ -363,12 +364,12 @@ class StudioEngine(
 
     // ---- Capturas -----------------------------------------------------------------------------
 
-    private fun createCapture(source: Source, longSide: Int, fps: Int) = when (source) {
+    private fun createCapture(source: Source, canvas: CanvasConfig) = when (source) {
         is Source.Camera -> devices.cameraIdFor(source.facing, source.cameraId)?.let { id ->
-            CameraCapture(appContext, id, longSide, fps) { displayRotationDegrees() }
+            CameraCapture(appContext, id, canvas.longSide, canvas.height > canvas.width, canvas.fps) { displayRotationDegrees() }
         }
-        is Source.UsbCamera -> UvcCapture({ devices.findUsbCamera(source.deviceName) }, longSide)
-        is Source.Screen -> ScreenCapture(projection, longSide)
+        is Source.UsbCamera -> UvcCapture({ devices.findUsbCamera(source.deviceName) }, canvas.longSide)
+        is Source.Screen -> ScreenCapture(projection, canvas.longSide)
         else -> null
     }
 

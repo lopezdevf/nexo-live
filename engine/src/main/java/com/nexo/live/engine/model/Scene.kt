@@ -69,6 +69,7 @@ data class CanvasConfig(
 ) {
     val orientation get() = if (width >= height) CanvasOrientation.Landscape else CanvasOrientation.Portrait
     val aspectRatio get() = width.toFloat() / height
+    val longSide get() = maxOf(width, height)
 
     companion object {
         val HD_LANDSCAPE = CanvasConfig(1280, 720, 30)

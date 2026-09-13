@@ -79,6 +79,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     fun onPermissionsResult(granted: Map<String, Boolean>) {
         val essential = listOf(android.Manifest.permission.CAMERA, android.Manifest.permission.RECORD_AUDIO)
         _missingPermissions.value = essential.any { granted[it] == false }
+        engine.compositor.retryFailedSources()
     }
 
     // ---- Vista previa --------------------------------------------------------------------

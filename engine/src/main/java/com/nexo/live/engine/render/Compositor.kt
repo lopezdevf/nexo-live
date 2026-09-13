@@ -34,7 +34,7 @@ enum class PreviewSlot { Edit, Program }
 
 fun interface CaptureFactory {
     /** null si la fuente no captura de un dispositivo (imagen, texto, color). */
-    fun create(source: Source, targetLongSide: Int, fps: Int): SurfaceCapture?
+    fun create(source: Source, canvas: CanvasConfig): SurfaceCapture?
 }
 
 /**
@@ -59,6 +59,8 @@ class Compositor(
     private val previews = HashMap<PreviewSlot, Target>()
     private val renderers = HashMap<String, SourceRenderer>()
     private val lastUsed = HashMap<String, Long>()
+    private val createdAt = HashMap<String, Long>()
+    private val retries = HashMap<String, Int>()
     private val projection = FloatArray(16)
     private val matrices = Matrices()
     private var running = false
@@ -149,14 +151,19 @@ class Compositor(
     // Temporizador propio en lugar de Choreographer: con la pantalla apagada no hay vsync y el
     // directo debe seguir.
 
+    private var nextTickMs = 0L
+
     private val tick = object : Runnable {
         override fun run() {
             if (!running) return
-            val start = SystemClock.uptimeMillis()
             renderFrame(System.nanoTime())
             val fps = maxOf(if (encoder != null) outputFps else 0, if (previews.isNotEmpty()) previewFps else 0, 5)
-            val interval = 1000L / fps
-            handler.postAtTime(this, start + maxOf(1L, interval - (SystemClock.uptimeMillis() - start).coerceAtMost(interval)))
+            // Cadencia fija: el siguiente fotograma cae un intervalo después del anterior, no del final del render
+            val interval = 1000.0 / fps
+            val now = SystemClock.uptimeMillis()
+            nextTickMs = if (nextTickMs == 0L || now - nextTickMs > interval) now + interval.toLong()
+            else nextTickMs + interval.toLong()
+            handler.postAtTime(this, nextTickMs)
         }
     }
 
@@ -229,7 +236,11 @@ class Compositor(
         }
     }
 
-    private fun due(now: Long, last: Long, fps: Int) = now - last >= 1_000_000_000L / fps.coerceAtLeast(1) - SLACK_NANOS
+    /** Holgura del 25 % del intervalo: con un temporizador de milisegundos, 33 ms deben contar como 30 fps. */
+    private fun due(now: Long, last: Long, fps: Int): Boolean {
+        val interval = 1_000_000_000L / fps.coerceAtLeast(1)
+        return now - last >= interval - interval / 4
+    }
 
     private fun ensureFramebuffers(canvas: CanvasConfig) {
         val scale = resolutionScale.coerceIn(0.25f, 1f)
@@ -318,16 +329,42 @@ class Compositor(
             lastUsed[id] = nowMs
             val existing = renderers[id]
             val identity = identityOf(source)
-            if (existing != null && existing.identity == identity) continue
+            if (existing != null && existing.identity == identity && !retryDue(id, nowMs)) continue
             existing?.release()
             renderers[id] = createRenderer(source, identity, canvas)
+            createdAt[id] = nowMs
         }
 
         val stale = renderers.keys.filter { it !in used && nowMs - (lastUsed[it] ?: 0L) > UNUSED_RELEASE_MS || state.sources[it] == null }
         for (id in stale) {
             renderers.remove(id)?.release()
             lastUsed.remove(id)
+            createdAt.remove(id)
+            retries.remove(id)
             _sourceStatus.update { it - id }
+        }
+    }
+
+    /**
+     * Una captura con error (permiso aún no concedido, cámara ocupada, USB desconectado) se
+     * reintenta sola con espera creciente: 3 s, 6 s, 12 s… hasta 30 s.
+     */
+    private fun retryDue(id: String, nowMs: Long): Boolean {
+        val status = _sourceStatus.value[id]
+        if (status is CaptureStatus.Running) retries.remove(id)
+        if (status !is CaptureStatus.Error) return false
+        val attempt = retries[id] ?: 0
+        val wait = minOf(RETRY_BASE_MS shl attempt.coerceAtMost(4), RETRY_MAX_MS)
+        if (nowMs - (createdAt[id] ?: 0L) < wait) return false
+        retries[id] = attempt + 1
+        return true
+    }
+
+    /** Reintenta ya todas las fuentes con error (p. ej. justo después de conceder permisos). */
+    fun retryFailedSources() = post {
+        retries.clear()
+        createdAt.keys.toList().forEach { id ->
+            if (_sourceStatus.value[id] is CaptureStatus.Error) createdAt[id] = 0L
         }
     }
 
@@ -337,7 +374,7 @@ class Compositor(
             is Source.SolidColor -> ColorRenderer(source.id)
             is Source.Image, is Source.Text -> BitmapRenderer(source.id, bitmapWorker, longSide)
             else -> {
-                val capture = captureFactory.create(source, longSide, canvas.fps)
+                val capture = captureFactory.create(source, canvas)
                 if (capture == null) ColorRenderer(source.id)
                 else ExternalRenderer(source.id, identity, capture) { id, status -> _sourceStatus.update { it + (id to status) } }
             }
@@ -358,6 +395,8 @@ class Compositor(
         renderers.values.forEach { it.release() }
         renderers.clear()
         lastUsed.clear()
+        createdAt.clear()
+        retries.clear()
         _sourceStatus.value = emptyMap()
     }
 
@@ -374,8 +413,9 @@ class Compositor(
 
     private companion object {
         const val TAG = "NexoCompositor"
-        const val SLACK_NANOS = 3_000_000L
         const val IDLE_RELEASE_MS = 3_000L
         const val UNUSED_RELEASE_MS = 5_000L
+        const val RETRY_BASE_MS = 3_000L
+        const val RETRY_MAX_MS = 30_000L
     }
 }

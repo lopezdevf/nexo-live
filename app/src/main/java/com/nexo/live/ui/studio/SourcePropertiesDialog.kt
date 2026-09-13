@@ -141,15 +141,18 @@ fun SourcePropertiesDialog(
 @Composable
 private fun CameraSection(source: Source.Camera, cameras: List<CameraEntry>, onUpdate: (Source) -> Unit) {
     SectionLabel("CÁMARA")
+    // Si el nombre sigue siendo uno automático, se actualiza con la cámara elegida
+    val autoNames = setOf("Cámara", "Cámara trasera", "Cámara frontal", "Cámara externa USB") + cameras.map { it.label }
+    fun named(label: String) = if (source.name in autoNames) label else source.name
     ChoiceRow(source.cameraId == null && source.facing == Facing.Back, "Trasera principal", "Se elige sola en cualquier móvil") {
-        onUpdate(source.copy(cameraId = null, facing = Facing.Back))
+        onUpdate(source.copy(cameraId = null, facing = Facing.Back, name = named("Cámara trasera")))
     }
     ChoiceRow(source.cameraId == null && source.facing == Facing.Front, "Frontal principal", null) {
-        onUpdate(source.copy(cameraId = null, facing = Facing.Front))
+        onUpdate(source.copy(cameraId = null, facing = Facing.Front, name = named("Cámara frontal")))
     }
     cameras.forEach { cam ->
         ChoiceRow(source.cameraId == cam.cameraId, cam.label, "Id ${cam.cameraId}") {
-            onUpdate(source.copy(cameraId = cam.cameraId, facing = cam.facing))
+            onUpdate(source.copy(cameraId = cam.cameraId, facing = cam.facing, name = named(cam.label)))
         }
     }
     if (cameras.none { it.facing == Facing.External }) {

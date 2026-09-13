@@ -20,7 +20,9 @@ import android.util.Range
 import android.util.Size
 import android.view.Surface
 import androidx.core.content.ContextCompat
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
  * Cámara por Camera2 (incluidas las USB que el sistema expone como externas).
@@ -30,6 +32,7 @@ class CameraCapture(
     context: Context,
     private val cameraId: String,
     private val targetLongSide: Int,
+    private val canvasPortrait: Boolean,
     private val fps: Int,
     private val displayRotation: () -> Int,
 ) : SurfaceCapture {
@@ -57,7 +60,11 @@ class CameraCapture(
                 val size = chooseSize(chars)
                 texture.setDefaultBufferSize(size.width, size.height)
                 val target = Surface(texture).also { surface = it }
-                listener.onFormat(CaptureFormat(size.width, size.height, rotationFor(chars)))
+                // La matriz de la SurfaceTexture ya gira el búfer según el sensor: el contenido llega
+                // en la orientación natural del móvil, solo falta compensar si el móvil está girado
+                val sensor = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+                val (w, h) = if (sensor % 180 != 0) size.height to size.width else size.width to size.height
+                listener.onFormat(CaptureFormat(w, h, (360 - displayRotation()) % 360))
 
                 @Suppress("MissingPermission")
                 manager.openCamera(cameraId, executor, object : CameraDevice.StateCallback() {
@@ -119,28 +126,44 @@ class CameraCapture(
             .onFailure { listener.onStatus(CaptureStatus.Error("No se pudo iniciar la cámara: ${it.message}")) }
     }
 
+    /** Espera a que la cámara se cierre: si se liberara antes la SurfaceTexture, la cámara escribiría en el vacío. */
     override fun stop() {
         stopped = true
+        val closed = CountDownLatch(1)
         handler.post {
+            runCatching { session?.stopRepeating() }
             runCatching { session?.close() }
             runCatching { device?.close() }
             surface?.release()
             session = null
             device = null
             surface = null
+            closed.countDown()
             thread.quitSafely()
         }
+        closed.await(700, TimeUnit.MILLISECONDS)
     }
 
     private fun chooseSize(chars: CameraCharacteristics): Size {
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
         val sizes = map?.getOutputSizes(SurfaceTexture::class.java)?.toList().orEmpty()
         if (sizes.isEmpty()) return Size(1280, 720)
-        val wanted = targetLongSide.coerceIn(640, 1920)
         val wide = sizes.filter { it.width * 9 == it.height * 16 && maxOf(it.width, it.height) <= 1920 }
         val pool = wide.ifEmpty { sizes.filter { maxOf(it.width, it.height) <= 1920 }.ifEmpty { sizes } }
-        return pool.filter { maxOf(it.width, it.height) >= wanted }.minByOrNull { it.width * it.height }
-            ?: pool.maxBy { it.width * it.height }
+
+        // Si el móvil está en vertical y el lienzo en horizontal (o al revés) la imagen se recorta mucho:
+        // entonces el lado corto de la cámara debe cubrir el lado largo del lienzo para no verse borrosa
+        val sensor = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        val naturalPortrait = sensor % 180 != 0
+        val contentPortrait = naturalPortrait != (displayRotation() % 180 != 0)
+        val mismatch = contentPortrait != canvasPortrait
+        val wanted = targetLongSide.coerceIn(640, 1920)
+        val candidates = if (mismatch) {
+            pool.filter { minOf(it.width, it.height) >= minOf(wanted, 1080) }
+        } else {
+            pool.filter { maxOf(it.width, it.height) >= wanted }
+        }
+        return candidates.minByOrNull { it.width * it.height } ?: pool.maxBy { it.width * it.height }
     }
 
     private fun bestFpsRange(chars: CameraCharacteristics): Range<Int>? {
@@ -148,16 +171,6 @@ class CameraCapture(
         // Rango fijo si existe (fps estables para el codificador); si no, el que llegue a los fps pedidos
         return ranges.firstOrNull { it.lower == fps && it.upper == fps }
             ?: ranges.filter { it.upper >= fps }.maxByOrNull { it.lower }
-    }
-
-    private fun rotationFor(chars: CameraCharacteristics): Int {
-        val sensor = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-        val device = displayRotation()
-        return if (chars.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT) {
-            (sensor + device) % 360
-        } else {
-            (sensor - device + 360) % 360
-        }
     }
 
     private fun errorMessage(error: Int) = when (error) {
