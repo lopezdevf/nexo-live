@@ -54,9 +54,10 @@ fun StatusStrip(state: StudioState, compact: Boolean, onSettings: () -> Unit, mo
             .height(36.dp)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 10.dp else 14.dp),
     ) {
-        Text("NEXO", style = Nexo.panelLabel, color = c.volt)
+        // En vertical no cabe todo: se quita la marca al emitir o grabar y el termómetro va sin texto
+        if (!compact || !(state.isLive || state.isRecording)) Text("NEXO", style = Nexo.panelLabel, color = c.volt)
         StatusBadge(
             label = when (val live = state.live) {
                 LiveStatus.Offline -> "FUERA DE AIRE"
@@ -71,9 +72,12 @@ fun StatusStrip(state: StudioState, compact: Boolean, onSettings: () -> Unit, mo
         if (state.isRecording) StatusBadge("REC", c.record, pulsing = true)
         Box(Modifier.weight(1f))
         if (!compact) Metric("${state.canvas.width}×${state.canvas.height}")
-        Metric(String.format(Locale.ROOT, "%.0f/%d fps", state.stats.fps, state.canvas.fps), warn = state.stats.fps > 0 && state.stats.fps < state.canvas.fps * 0.8f)
+        val fpsLow = state.stats.fps > 0 && state.stats.fps < state.canvas.fps * 0.8f
+        if (!compact || !state.isLive || fpsLow) {
+            Metric(String.format(Locale.ROOT, "%.0f/%d fps", state.stats.fps, state.canvas.fps), warn = fpsLow)
+        }
         if (state.isLive) Metric("${state.stats.bitrateKbps} kbps")
-        ThermalBadge(state)
+        ThermalBadge(state, iconOnly = compact && (state.isLive || state.isRecording))
         Box(Modifier.size(32.dp).clickable(onClickLabel = "Ajustes", onClick = onSettings), contentAlignment = Alignment.Center) {
             Icon(Icons.Outlined.Settings, contentDescription = "Ajustes", tint = c.textMid, modifier = Modifier.size(18.dp))
         }
@@ -82,7 +86,7 @@ fun StatusStrip(state: StudioState, compact: Boolean, onSettings: () -> Unit, mo
 
 /** Termómetro: solo aparece cuando el móvil se calienta, con color según el nivel. */
 @Composable
-private fun ThermalBadge(state: StudioState) {
+private fun ThermalBadge(state: StudioState, iconOnly: Boolean) {
     val level = state.thermalLevel
     if (level == ThermalLevel.None) return
     val color = when (level) {
@@ -91,7 +95,8 @@ private fun ThermalBadge(state: StudioState) {
         else -> Nexo.colors.live
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Outlined.Thermostat, contentDescription = "Temperatura", tint = color, modifier = Modifier.size(16.dp))
+        Icon(Icons.Outlined.Thermostat, contentDescription = "Temperatura: ${level.label}", tint = color, modifier = Modifier.size(16.dp))
+        if (iconOnly) return@Row
         Text(level.label.uppercase(), style = Nexo.panelLabel, color = color)
         if (state.thermalThrottled) Text(" · AHORRO", style = Nexo.panelLabel, color = color)
     }

@@ -65,6 +65,7 @@ fun StudioScreen(vm: StudioViewModel, destinationsVm: DestinationsViewModel, onR
     val snackbar = remember { SnackbarHostState() }
     var sceneToDelete by remember { mutableStateOf<Scene?>(null) }
     var destinationToDelete by remember { mutableStateOf<StreamDestination?>(null) }
+    var confirmEndLive by remember { mutableStateOf(false) }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let(vm::addImage)
@@ -101,7 +102,11 @@ fun StudioScreen(vm: StudioViewModel, destinationsVm: DestinationsViewModel, onR
         destinationsVm = destinationsVm,
         onRemoveScene = { id -> sceneToDelete = state.scenes.firstOrNull { it.id == id } },
         onDeleteDestination = { id -> destinationToDelete = destinations.rows.firstOrNull { it.destination.id == id }?.destination },
-        onGoLive = { if (!destinationsVm.goLive()) vm.showDock(DockTab.Destinations) },
+        // Un toque sin querer no debe cortar el directo: terminar pide confirmación
+        onGoLive = {
+            if (state.isLive) confirmEndLive = true
+            else if (!destinationsVm.goLive()) vm.showDock(DockTab.Destinations)
+        },
         onAddSource = { kind ->
             if (kind == SourceKind.Image) imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             else vm.addSource(kind)
@@ -155,6 +160,16 @@ fun StudioScreen(vm: StudioViewModel, destinationsVm: DestinationsViewModel, onR
             enabled = state.scenes.size > 1,
             onConfirm = { vm.removeScene(scene.id) },
             onDismiss = { sceneToDelete = null },
+        )
+    }
+
+    if (confirmEndLive) {
+        ConfirmDelete(
+            title = "¿Terminar el directo?",
+            message = if (state.isRecording) "Se corta la emisión en todos los destinos. La grabación sigue." else "Se corta la emisión en todos los destinos.",
+            confirmLabel = "Terminar",
+            onConfirm = destinationsVm::endLive,
+            onDismiss = { confirmEndLive = false },
         )
     }
 
@@ -361,6 +376,7 @@ private fun ConfirmDelete(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
     enabled: Boolean = true,
+    confirmLabel: String = "Eliminar",
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -368,7 +384,7 @@ private fun ConfirmDelete(
         text = { Text(message) },
         confirmButton = {
             TextButton(enabled = enabled, onClick = { onConfirm(); onDismiss() }) {
-                Text("Eliminar", color = Nexo.colors.live)
+                Text(confirmLabel, color = Nexo.colors.live)
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },

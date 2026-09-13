@@ -130,8 +130,11 @@ añadido posterior. Exige registrar una app de desarrollador en cada plataforma 
 2. **Destinos** ✅ — catálogo de plataformas, enlaces de conexión, claves cifradas, multistream y prueba de conexión.
 3. **Compositor GL** ✅ — hilo de render EGL, cámaras, UVC, pantalla, color, texto e imagen, fundidos y vista previa real.
 4. **Salida** ✅ — codificadores MediaCodec conectados a `MultiStreamer`, grabación MP4, servicio en primer plano y
-   bitrate adaptativo.
+   bitrate adaptativo. El vídeo va en VBR por defecto: medido en un Snapdragon, el CBR del codificador
+   compensa el pico de cada cambio de escena bajando a ~150–350 kbps durante 1,5–2 s (imagen borrosa),
+   y el VBR mantiene el bitrate objetivo.
 5. **Audio y dispositivos** ✅ — captura por dispositivo, audio interno, mezclador, vúmetros y monitorización.
 6. **Térmica, ajustes y guardado** ✅ — protección térmica real, ajustes completos y escenas persistentes.
-7. **Validación en dispositivos** — pruebas en varios fabricantes (rotación de cámaras, codificadores, UVC).
+7. **Validación en dispositivos** — probado en un Galaxy S25 Ultra (cámaras, grabación, Twitch 1080p60, fuente PC con
+   OBS por WiFi); faltan más fabricantes, cámaras UVC y capturadoras.
 8. **Extras** — inicio de sesión OAuth por plataforma, chroma key/LUT, overlay de chat y alertas.

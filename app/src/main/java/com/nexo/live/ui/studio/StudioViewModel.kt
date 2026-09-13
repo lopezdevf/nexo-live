@@ -107,12 +107,15 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addSource(kind: SourceKind) {
         val id = UUID.randomUUID().toString()
-        val count = state.value.sources.values.count { it.kind == kind }
-        val name = if (count == 0) kind.label else "${kind.label} ${count + 1}"
+        val existing = state.value.sources.values
+        val count = existing.count { it.kind == kind }
+        // La etiqueta del menú explica el tipo; en las listas basta con un nombre corto
+        val base = if (kind == SourceKind.PcInput) "PC" else kind.label
+        val name = if (count == 0) base else "$base ${count + 1}"
         val source = when (kind) {
             SourceKind.Camera -> Source.Camera(id, name, Facing.Back)
             SourceKind.UsbCamera -> Source.UsbCamera(id, name)
-            SourceKind.PcInput -> Source.PcInput(id, name, port = 9000 + count)
+            SourceKind.PcInput -> Source.PcInput(id, name, port = generateSequence(9000) { it + 1 }.first { p -> existing.none { it is Source.PcInput && it.port == p } })
             SourceKind.Screen -> Source.Screen(id, name)
             SourceKind.Image -> return // se añade tras elegir la imagen
             SourceKind.Text -> Source.Text(id, name, text = "Texto nuevo", backgroundArgb = 0x99000000)
@@ -206,9 +209,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             // Cambiar resolución, fps o códec a mitad de directo rompería la emisión
             if (after.video.width != before.video.width || after.video.height != before.video.height ||
                 after.video.fps != before.video.fps || after.video.codec != before.video.codec ||
+                after.video.bitrateMode != before.video.bitrateMode ||
                 after.audio.sampleRate != before.audio.sampleRate
             ) {
-                _notice.value = "Detén el directo y la grabación para cambiar resolución, fps, códec o frecuencia de audio"
+                _notice.value = "Detén el directo y la grabación para cambiar resolución, fps, códec, control de bitrate o frecuencia de audio"
                 return
             }
         }

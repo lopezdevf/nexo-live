@@ -4,6 +4,7 @@
 package com.nexo.live.engine.settings
 
 import com.nexo.live.engine.model.AudioDeviceKey
+import com.nexo.live.engine.model.BitrateMode
 import com.nexo.live.engine.model.CanvasConfig
 import com.nexo.live.engine.model.EncoderConfig
 import com.nexo.live.engine.model.VideoCodecChoice
@@ -36,6 +37,7 @@ data class VideoSettings(
     val bitrateKbps: Int = 4_000,
     val keyframeSec: Int = 2,
     val codec: VideoCodecChoice = VideoCodecChoice.H264,
+    val bitrateMode: BitrateMode = BitrateMode.Vbr,
     /** Baja el bitrate si la red se congestiona y lo recupera después. */
     val adaptiveBitrate: Boolean = true,
     /** La vista previa puede ir más lenta que la salida para ahorrar batería y calor. */

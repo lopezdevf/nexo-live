@@ -68,6 +68,8 @@ class PcLinkReceiver(context: Context, val port: Int) {
     private val handler = Handler(thread.looper)
 
     @Volatile private var server: ServerSocket? = null
+    /** Conexiones abiertas: al reiniciar se cierran, o un hilo de carga se quedaría bloqueado leyendo. */
+    private val sockets = java.util.concurrent.CopyOnWriteArraySet<Socket>()
     private var player: ExoPlayer? = null
     private var surface: Surface? = null
     @Volatile private var released = false
@@ -104,6 +106,7 @@ class PcLinkReceiver(context: Context, val port: Int) {
     fun release() {
         released = true
         runCatching { server?.close() } // desbloquea la espera de conexión
+        closeSockets()
         handler.post {
             player?.release()
             player = null
@@ -152,10 +155,16 @@ class PcLinkReceiver(context: Context, val port: Int) {
             it.release()
         }
         player = null
+        closeSockets()
         handler.removeCallbacks(latencyGuard)
         if (reason != null) Log.i(TAG, "Reiniciando enlace con el PC: $reason")
         publish(PcLinkStatus.Waiting(port))
         handler.postDelayed({ if (!released) createPlayer() }, 500)
+    }
+
+    private fun closeSockets() {
+        sockets.forEach { runCatching { it.close() } }
+        sockets.clear()
     }
 
     private val playerListener = object : Player.Listener {
@@ -211,6 +220,7 @@ class PcLinkReceiver(context: Context, val port: Int) {
             val s = (server ?: throw java.io.IOException("Servidor cerrado")).accept()
             s.tcpNoDelay = true
             s.receiveBufferSize = 1 shl 20
+            sockets += s
             socket = s
             input = BufferedInputStream(s.getInputStream(), 1 shl 16)
             opened = true
@@ -229,6 +239,7 @@ class PcLinkReceiver(context: Context, val port: Int) {
         override fun getUri(): Uri = Uri.parse("tcp://0.0.0.0:$port")
 
         override fun close() {
+            socket?.let { sockets -= it }
             runCatching { socket?.close() }
             socket = null
             input = null

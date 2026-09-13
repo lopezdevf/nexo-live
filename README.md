@@ -9,8 +9,9 @@ pensado desde cero para el móvil.
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/lopezdevf?label=Apoyar)](https://github.com/sponsors/lopezdevf)
 
 > **Estado:** alfa. Todo el flujo (compositor OpenGL, captura, codificación, emisión, grabación, audio y
-> control térmico) está implementado, compila y pasa sus tests, pero **aún no se ha probado en muchos
-> móviles reales**. Si lo pruebas, cuéntanos cómo va en *issues*.
+> control térmico) está implementado y probado en un Galaxy S25 Ultra: cámaras trasera y frontal,
+> grabación, emisión a Twitch en 1080p60, mezclador y la fuente PC con OBS por WiFi. **Aún falta
+> probarlo en más móviles**; si lo pruebas, cuéntanos cómo va en *issues*.
 
 ## Características
 
@@ -74,7 +75,8 @@ La arquitectura está explicada en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
 - [x] Mesa de control: escenas, capas, lienzo editable con gestos, modo estudio con fundido
 - [x] Destinos: 15 plataformas, enlaces de conexión, claves cifradas, multistream, prueba de conexión
 - [x] Compositor OpenGL: cámaras (incluidas externas), cámaras USB/capturadoras UVC, pantalla, imagen y texto
-- [x] Codificación por hardware H.264/H.265, emisión RTMP/SRT, grabación MP4 y bitrate adaptativo
+- [x] Codificación por hardware H.264/H.265 (VBR o CBR), emisión RTMP/SRT, grabación MP4 y bitrate adaptativo
+- [x] Fuente PC: recibe OBS por WiFi o cable USB, sin capturadora
 - [x] Audio por dispositivo (integrado, cable, USB, Bluetooth), audio interno, mezclador y monitorización
 - [x] Control térmico real (estado del sistema, margen previsto y batería)
 - [x] Ajustes completos, propiedades de cada fuente y escenas guardadas entre sesiones

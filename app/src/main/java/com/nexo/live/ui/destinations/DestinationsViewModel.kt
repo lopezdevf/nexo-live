@@ -128,6 +128,10 @@ class DestinationsViewModel(private val engine: StudioEngine) : ViewModel() {
         }
     }
 
+    fun endLive() {
+        viewModelScope.launch(Dispatchers.Default) { engine.stopStreaming() }
+    }
+
     /** Emite o termina. false si no hay destinos activos (la pantalla abre la pestaña de destinos). */
     fun goLive(): Boolean {
         if (engine.isStreaming) {

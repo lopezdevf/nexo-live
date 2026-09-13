@@ -157,7 +157,8 @@ class CameraCapture(
             device = null
             surface = null
             closed.countDown()
-            thread.quitSafely()
+            // Camera2 aún avisa del cierre por este hilo: se termina un poco después
+            handler.postDelayed({ thread.quitSafely() }, 1_000)
         }
         closed.await(700, TimeUnit.MILLISECONDS)
     }

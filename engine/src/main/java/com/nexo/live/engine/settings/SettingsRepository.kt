@@ -60,7 +60,7 @@ class SettingsRepository(context: Context) {
             .put("video", JSONObject()
                 .put("width", s.video.width).put("height", s.video.height).put("fps", s.video.fps)
                 .put("bitrate", s.video.bitrateKbps).put("keyframe", s.video.keyframeSec)
-                .put("codec", s.video.codec.name).put("adaptive", s.video.adaptiveBitrate)
+                .put("codec", s.video.codec.name).put("bitrateMode", s.video.bitrateMode.name).put("adaptive", s.video.adaptiveBitrate)
                 .put("previewFps", s.video.previewFps).put("keepScreenOn", s.video.keepScreenOn))
             .put("audio", JSONObject()
                 .put("sampleRate", s.audio.sampleRate).put("bitrate", s.audio.bitrateKbps)
@@ -91,6 +91,7 @@ class SettingsRepository(context: Context) {
                     bitrateKbps = v.optInt("bitrate", d.video.bitrateKbps),
                     keyframeSec = v.optInt("keyframe", d.video.keyframeSec),
                     codec = enumOr(v.optString("codec"), d.video.codec),
+                    bitrateMode = enumOr(v.optString("bitrateMode"), d.video.bitrateMode),
                     adaptiveBitrate = v.optBoolean("adaptive", d.video.adaptiveBitrate),
                     previewFps = v.optInt("previewFps", d.video.previewFps),
                     keepScreenOn = v.optBoolean("keepScreenOn", d.video.keepScreenOn),

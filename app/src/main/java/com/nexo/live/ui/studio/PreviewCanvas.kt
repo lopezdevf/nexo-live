@@ -18,6 +18,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -172,11 +175,12 @@ private fun StatusBadgeOverlay(item: SceneItem, source: Source, status: CaptureS
 }
 
 /** Qué hace cada tirador: las esquinas redimensionan y los lados recortan (como Alt+arrastrar en OBS). */
+/** Los lados van primero: las esquinas se dibujan encima y ganan el toque donde se solapan. */
 private enum class Handle(val alignment: Alignment, val crop: Boolean) {
-    TopStart(Alignment.TopStart, false), TopEnd(Alignment.TopEnd, false),
-    BottomStart(Alignment.BottomStart, false), BottomEnd(Alignment.BottomEnd, false),
     Left(Alignment.CenterStart, true), Right(Alignment.CenterEnd, true),
     Top(Alignment.TopCenter, true), Bottom(Alignment.BottomCenter, true),
+    TopStart(Alignment.TopStart, false), TopEnd(Alignment.TopEnd, false),
+    BottomStart(Alignment.BottomStart, false), BottomEnd(Alignment.BottomEnd, false),
 }
 
 @Composable
@@ -192,15 +196,30 @@ private fun SelectionFrame(item: SceneItem, widthPx: Float, heightPx: Float, onT
         Box(
             Modifier
                 .offset(x = (t.x * widthPx).toDp() - half, y = (t.y * heightPx).toDp() - half)
-                .size(width = (t.width * widthPx).toDp() + touch, height = (t.height * heightPx).toDp() + touch)
+                // El marco sobresale medio tirador del lienzo: sin esto se encogería a su tamaño y
+                // los tiradores de la derecha y de abajo quedarían desplazados hacia dentro
+                .wrapContentSize(Alignment.TopStart, unbounded = true)
+                .requiredSize(width = (t.width * widthPx).toDp() + touch, height = (t.height * heightPx).toDp() + touch)
         ) {
             Box(Modifier.fillMaxSize().padding(half).border(2.dp, accent))
             if (!item.locked) {
-                Handle.entries.forEach { handle ->
+                // En una caja más pequeña que un tirador, el del lado quedaría tapado por las esquinas
+                val boxW = t.width * widthPx
+                val boxH = t.height * heightPx
+                val touchPx = touch.toPx()
+                Handle.entries.filter { h ->
+                    when (h) {
+                        Handle.Left, Handle.Right -> boxH >= touchPx
+                        Handle.Top, Handle.Bottom -> boxW >= touchPx
+                        else -> true
+                    }
+                }.forEach { handle ->
                     Box(
                         Modifier
                             .align(handle.alignment)
                             .size(touch)
+                            // Junto al borde de la pantalla, el gesto de «atrás» del sistema se quedaría el arrastre
+                            .systemGestureExclusion()
                             .pointerInput(item.id, handle) {
                                 var start = latest.transform
                                 var total = Offset.Zero

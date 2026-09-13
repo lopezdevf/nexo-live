@@ -105,6 +105,7 @@ private fun SceneCard(
                 when {
                     onAir -> "AL AIRE"
                     inPreview -> "PREVIO"
+                    scene.items.size == 1 -> "1 elemento"
                     else -> "${scene.items.size} elementos"
                 },
                 style = Nexo.numeric,

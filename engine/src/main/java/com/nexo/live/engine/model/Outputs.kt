@@ -57,6 +57,13 @@ data class EncoderConfig(
 
 enum class VideoCodecChoice { H264, H265 }
 
+/**
+ * VBR: el codificador reparte los bits según lo que cambia la imagen. CBR: bitrate fijo, pero los
+ * codificadores de los móviles lo cumplen dejando la imagen borrosa varios segundos tras cada
+ * cambio brusco (cambio de escena, fundido).
+ */
+enum class BitrateMode { Vbr, Cbr }
+
 sealed interface LiveStatus {
     data object Offline : LiveStatus
     data object Connecting : LiveStatus

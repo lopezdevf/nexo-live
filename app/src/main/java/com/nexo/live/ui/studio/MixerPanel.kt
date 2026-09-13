@@ -84,8 +84,8 @@ fun MixerPanel(
                     )
                     ToolButton(Icons.Outlined.Tune, "Ajustes de ${source.name}", { onProperties(channel.sourceId) })
                 }
-                errors[channel.sourceId]?.let { Text(it, style = Nexo.numeric, color = Nexo.colors.record) }
-                LevelMeter(level = levels[channel.sourceId] ?: 0f, muted = channel.muted, modifier = Modifier.fillMaxWidth().height(6.dp))
+                errors[channel.sourceId]?.let { Text(it, style = Nexo.numeric, color = Nexo.colors.record, modifier = Modifier.padding(top = 4.dp)) }
+                LevelMeter(level = levels[channel.sourceId] ?: 0f, muted = channel.muted, modifier = Modifier.padding(top = 6.dp).fillMaxWidth().height(6.dp))
                 Slider(
                     value = channel.gainDb,
                     onValueChange = { onGain(channel.sourceId, it) },

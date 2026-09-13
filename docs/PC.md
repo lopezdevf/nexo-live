@@ -46,5 +46,7 @@ ffmpeg -f gdigrab -framerate 60 -i desktop -f dshow -i audio="Mezcla estéreo" -
 
 - Emite desde el móvil a 1080p30 o 720p60: el móvil decodifica el PC y vuelve a codificar, y así se calienta menos.
 - El audio del PC entra en el mezclador como un canal más: puedes bajarlo, silenciarlo o monitorizarlo.
-- Si OBS dice «No se pudo abrir la URL», comprueba que la fuente PC está añadida en Nexo y que la
+- Si paras la grabación en OBS y la vuelves a iniciar, Nexo se reconecta solo; no hace falta tocar el móvil.
+- En OBS, añade **Captura de juego** o **Captura de pantalla** a la escena: es lo que llega al móvil.
+- Si OBS dice «No se pudo abrir la URL» o «error no especificado durante la grabación», comprueba que la fuente PC está añadida en Nexo y que la
   dirección y el puerto coinciden.

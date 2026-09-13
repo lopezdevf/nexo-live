@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.nexo.live.engine.devices.AudioDeviceEntry
+import com.nexo.live.engine.model.BitrateMode
 import com.nexo.live.engine.model.VideoCodecChoice
 import com.nexo.live.engine.settings.AudioSettings
 import com.nexo.live.engine.settings.StudioSettings
@@ -113,6 +114,15 @@ private fun VideoSection(s: StudioSettings, onUpdate: ((StudioSettings) -> Studi
     if (v.codec == VideoCodecChoice.H265) {
         Callout("H.265 solo se usa si todos los destinos activos lo admiten (YouTube o servidores propios); si no, se emite en H.264.", Nexo.colors.textMid)
     }
+    SectionLabel("CONTROL DE BITRATE")
+    Chips(BitrateMode.entries, v.bitrateMode, { if (it == BitrateMode.Vbr) "Variable (recomendado)" else "Constante (CBR)" }) { mode ->
+        onUpdate { it.copy(video = it.video.copy(bitrateMode = mode)) }
+    }
+    Text(
+        if (v.bitrateMode == BitrateMode.Vbr) "Nítido al cambiar de escena; de media se mantiene en el bitrate elegido."
+        else "Bitrate fijo: tras cada cambio de escena la imagen puede verse borrosa unos segundos.",
+        style = Nexo.numeric, color = Nexo.colors.textLow,
+    )
     SwitchRow("Bitrate adaptativo", "Baja la calidad si tu conexión se satura y la recupera después", v.adaptiveBitrate) { on ->
         onUpdate { it.copy(video = it.video.copy(adaptiveBitrate = on)) }
     }

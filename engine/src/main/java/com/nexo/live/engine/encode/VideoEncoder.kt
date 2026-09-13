@@ -19,6 +19,7 @@ data class VideoEncoderConfig(
     val bitrateKbps: Int,
     val keyframeSec: Int,
     val hevc: Boolean,
+    val constantBitrate: Boolean = false,
 )
 
 interface VideoEncoderListener {
@@ -53,10 +54,10 @@ class VideoEncoder(private val listener: VideoEncoderListener) {
             setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 1_000_000L / config.fps * 2)
         }
         val info = findEncoder(mime, config)
+        val mode = if (config.constantBitrate) MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
+        else MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
         info?.getCapabilitiesForType(mime)?.encoderCapabilities?.let { caps ->
-            if (caps.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)) {
-                format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-            }
+            if (caps.isBitrateModeSupported(mode)) format.setInteger(MediaFormat.KEY_BITRATE_MODE, mode)
         }
         val codec = info?.let { MediaCodec.createByCodecName(it.name) } ?: MediaCodec.createEncoderByType(mime)
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)

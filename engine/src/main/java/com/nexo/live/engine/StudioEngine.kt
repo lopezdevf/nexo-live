@@ -20,6 +20,7 @@ import com.nexo.live.engine.encode.AudioEncoderListener
 import com.nexo.live.engine.encode.VideoEncoder
 import com.nexo.live.engine.encode.VideoEncoderConfig
 import com.nexo.live.engine.encode.VideoEncoderListener
+import com.nexo.live.engine.model.BitrateMode
 import com.nexo.live.engine.model.CanvasConfig
 import com.nexo.live.engine.model.RecordStatus
 import com.nexo.live.engine.model.Source
@@ -174,11 +175,14 @@ class StudioEngine(
 
     // ---- Emisión ------------------------------------------------------------------------------
 
+    /** Empezar y parar llegan desde varios hilos (botones, térmica, servicio): nunca a la vez. */
+    private val controlLock = Any()
+
     val isStreaming: Boolean get() = streamer.isActive
     val isRecording: Boolean get() = recorder.isRecording
 
     /** Conecta todos los destinos activos. Devuelve un mensaje si no se pudo empezar. */
-    fun startStreaming(): String? {
+    fun startStreaming(): String? = synchronized(controlLock) {
         val enabled = destinations.destinations.value.filter { it.enabled }
         if (enabled.isEmpty()) return "Añade o activa al menos un destino para emitir."
         startForegroundService()
@@ -192,13 +196,13 @@ class StudioEngine(
         return null
     }
 
-    fun stopStreaming() {
+    fun stopStreaming(): Unit = synchronized(controlLock) {
         streamer.stop()
         bitrateJob?.cancel()
         releaseOutputIfIdle()
     }
 
-    fun startRecording(): String? {
+    fun startRecording(): String? = synchronized(controlLock) {
         if (recorder.isRecording) return null
         startForegroundService()
         synchronized(outputLock) {
@@ -213,7 +217,7 @@ class StudioEngine(
         return null
     }
 
-    fun stopRecording() {
+    fun stopRecording(): Unit = synchronized(controlLock) {
         val uri = recorder.stop()
         studio.setRecord(RecordStatus.Idle)
         if (uri != null) _events.tryEmit("Grabación guardada en Movies/${settings.settings.value.recording.folder}")
@@ -248,7 +252,7 @@ class StudioEngine(
         val bitrate = profile.bitrate(s.video.bitrateKbps, s.thermal.minBitrateKbps)
         val video = VideoEncoder(videoListener)
         val surface = try {
-            video.start(VideoEncoderConfig(canvas.width, canvas.height, canvas.fps, bitrate, s.video.keyframeSec, hevc))
+            video.start(VideoEncoderConfig(canvas.width, canvas.height, canvas.fps, bitrate, s.video.keyframeSec, hevc, s.video.bitrateMode == BitrateMode.Cbr))
         } catch (e: Exception) {
             video.stop()
             return null
