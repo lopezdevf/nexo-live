@@ -23,6 +23,9 @@ Elige cómo se conectan:
 
 ## 2. En OBS (una sola vez)
 
+Consejo: crea un perfil aparte (**Perfil → Nuevo**, por ejemplo «Nexo Live») para no cambiar la
+grabación de tu perfil habitual. Cambias de perfil desde el mismo menú cuando quieras jugar con el móvil.
+
 1. **Ajustes → Salida → Modo de salida: Avanzado.**
 2. Pestaña **Grabación** → **Tipo: Salida personalizada (FFmpeg)**.
 3. **Tipo de salida FFmpeg: Enviar a URL**. URL: la dirección que muestra el móvil.
