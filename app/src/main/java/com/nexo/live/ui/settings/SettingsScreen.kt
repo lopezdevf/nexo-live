@@ -119,6 +119,11 @@ private fun VideoSection(s: StudioSettings, onUpdate: ((StudioSettings) -> Studi
     SectionLabel("FPS DE LA VISTA PREVIA")
     Chips(listOf(10, 15, 24, 30, 60), v.previewFps, { "$it" }) { fps -> onUpdate { it.copy(video = it.video.copy(previewFps = fps)) } }
     Text("Una vista previa más lenta ahorra batería y calor; no afecta al directo.", style = Nexo.numeric, color = Nexo.colors.textLow)
+    SwitchRow(
+        "Mantener la pantalla encendida con el estudio abierto",
+        "Al emitir o grabar nunca se apaga; y si bloqueas el móvil, el directo sigue en segundo plano",
+        v.keepScreenOn,
+    ) { on -> onUpdate { it.copy(video = it.video.copy(keepScreenOn = on)) } }
 }
 
 @Composable

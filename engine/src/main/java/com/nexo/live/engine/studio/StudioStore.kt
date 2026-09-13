@@ -104,6 +104,7 @@ class StudioStore(context: Context) {
                     .put("rotation", source.rotationOffset).put("mirror", source.mirror)
                 is Source.UsbCamera -> o.put("type", "usb").put("device", source.deviceName ?: JSONObject.NULL)
                     .put("rotation", source.rotationOffset).put("mirror", source.mirror)
+                is Source.PcInput -> o.put("type", "pc").put("port", source.port)
                 is Source.Screen -> o.put("type", "screen")
                 is Source.Image -> o.put("type", "image").put("uri", source.uri)
                 is Source.Text -> o.put("type", "text").put("text", source.text).put("color", source.colorArgb)
@@ -122,6 +123,7 @@ class StudioStore(context: Context) {
                 "camera" -> Source.Camera(id, name, enumOr(o.optString("facing"), Facing.Back), o.nullableString("cameraId"),
                     o.optInt("rotation", 0), o.optBoolean("mirror", false))
                 "usb" -> Source.UsbCamera(id, name, o.nullableString("device"), o.optInt("rotation", 0), o.optBoolean("mirror", false))
+                "pc" -> Source.PcInput(id, name, o.optInt("port", 9000))
                 "screen" -> Source.Screen(id, name)
                 "image" -> Source.Image(id, name, o.getString("uri"))
                 "text" -> Source.Text(id, name, o.optString("text"), o.optLong("color", 0xFFFFFFFF), o.optLong("background", 0),

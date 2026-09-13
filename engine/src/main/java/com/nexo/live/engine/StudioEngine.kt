@@ -29,6 +29,8 @@ import com.nexo.live.engine.output.MultiStreamer
 import com.nexo.live.engine.output.OutputFormat
 import com.nexo.live.engine.output.PlatformCatalog
 import com.nexo.live.engine.output.Recorder
+import com.nexo.live.engine.pclink.PcCapture
+import com.nexo.live.engine.pclink.PcLinkHub
 import com.nexo.live.engine.render.CaptureFactory
 import com.nexo.live.engine.render.Compositor
 import com.nexo.live.engine.render.PreviewSlot
@@ -68,6 +70,7 @@ interface StudioEngineHost {
  * Orquesta el estudio: compositor, audio, codificadores, destinos, grabación y protección térmica.
  * Los codificadores solo existen mientras se emite o se graba.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class StudioEngine(
     context: Context,
     val studio: StudioController,
@@ -85,7 +88,10 @@ class StudioEngine(
 
     val compositor = Compositor(studio, settings.settings, CaptureFactory { source, canvas -> createCapture(source, canvas) })
 
-    val audio = AudioEngine(appContext, studio, devices, settings.settings) { projectionHandle() }
+    /** Receptores de vídeo y audio del PC, compartidos por compositor y mezclador. */
+    val pcLink = PcLinkHub(appContext)
+
+    val audio = AudioEngine(appContext, studio, devices, settings.settings, { projectionHandle() }, pcLink)
 
     private val recorder = Recorder(appContext)
     private val governor = ThermalGovernor(settings.settings.value.thermal)
@@ -369,6 +375,7 @@ class StudioEngine(
             CameraCapture(appContext, id, canvas.longSide, canvas.height > canvas.width, canvas.fps) { displayRotationDegrees() }
         }
         is Source.UsbCamera -> UvcCapture({ devices.findUsbCamera(source.deviceName) }, canvas.longSide)
+        is Source.PcInput -> PcCapture(pcLink, source)
         is Source.Screen -> ScreenCapture(projection, canvas.longSide)
         else -> null
     }

@@ -25,6 +25,8 @@ import androidx.core.content.ContextCompat
 import com.nexo.live.engine.devices.DeviceCatalog
 import com.nexo.live.engine.model.MonitoringMode
 import com.nexo.live.engine.model.Source
+import com.nexo.live.engine.pclink.PcLinkHub
+import com.nexo.live.engine.pclink.PcLinkReceiver
 import com.nexo.live.engine.settings.StudioSettings
 import com.nexo.live.engine.studio.StudioController
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,12 +39,14 @@ import java.util.concurrent.locks.LockSupport
  * Captura cada fuente de audio en su hilo, las mezcla en bloques de 1024 muestras (un fotograma AAC)
  * con el reloj del sistema y reparte la mezcla al codificador y a los audífonos.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AudioEngine(
     context: Context,
     private val studio: StudioController,
     private val devices: DeviceCatalog,
     private val settings: StateFlow<StudioSettings>,
     private val projection: () -> MediaProjection?,
+    private val pcLink: PcLinkHub,
 ) {
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
@@ -207,8 +211,19 @@ class AudioEngine(
         private var channels = 2
         private var effects = mutableListOf<android.media.audiofx.AudioEffect>()
 
+        private var pcReceiver: PcLinkReceiver? = null
+
         @SuppressLint("MissingPermission")
         fun open(): Boolean {
+            if (source is Source.PcInput) {
+                // El audio del PC llega ya decodificado desde el receptor: no hace falta micrófono
+                val receiver = pcLink.acquire(source)
+                receiver.targetSampleRate = sampleRate
+                receiver.audioListener = { pcm -> ring.write(pcm, pcm.size) }
+                pcReceiver = receiver
+                alive = true
+                return true
+            }
             if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 fail("Falta el permiso de micrófono")
                 return false
@@ -318,6 +333,11 @@ class AudioEngine(
 
         fun stop() {
             alive = false
+            pcReceiver?.let {
+                it.audioListener = null
+                pcLink.release(source.id, it)
+            }
+            pcReceiver = null
             runCatching { record?.stop() }
             thread?.join(500)
             effects.forEach { runCatching { it.release() } }

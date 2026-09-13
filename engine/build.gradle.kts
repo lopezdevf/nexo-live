@@ -28,6 +28,7 @@ dependencies {
     implementation(libs.rootencoder.rtmp)
     implementation(libs.rootencoder.srt)
     implementation(libs.uvc.android)
+    implementation(libs.media3.exoplayer)
 
     testImplementation(libs.junit)
 }

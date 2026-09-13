@@ -43,6 +43,19 @@ sealed interface Source {
         override val hasAudio = false
     }
 
+    /**
+     * Vídeo y audio del PC sin capturadora: OBS o ffmpeg envían MPEG-TS por TCP al móvil,
+     * que escucha en [port] (WiFi, zona WiFi del móvil o anclaje USB).
+     */
+    data class PcInput(
+        override val id: String,
+        override val name: String,
+        val port: Int = 9000,
+    ) : Source {
+        override val hasVideo = true
+        override val hasAudio = true
+    }
+
     /** Captura de pantalla vía MediaProjection (juegos, apps). */
     data class Screen(
         override val id: String,
@@ -118,12 +131,13 @@ enum class TextAlignment { Start, Center, End }
  */
 data class AudioDeviceKey(val type: Int, val productName: String, val address: String = "")
 
-enum class SourceKind { Camera, UsbCamera, Screen, Image, Text, SolidColor, Microphone, InternalAudio }
+enum class SourceKind { Camera, UsbCamera, PcInput, Screen, Image, Text, SolidColor, Microphone, InternalAudio }
 
 val Source.kind: SourceKind
     get() = when (this) {
         is Source.Camera -> SourceKind.Camera
         is Source.UsbCamera -> SourceKind.UsbCamera
+        is Source.PcInput -> SourceKind.PcInput
         is Source.Screen -> SourceKind.Screen
         is Source.Image -> SourceKind.Image
         is Source.Text -> SourceKind.Text
@@ -135,6 +149,7 @@ val Source.kind: SourceKind
 fun Source.renamed(name: String): Source = when (this) {
     is Source.Camera -> copy(name = name)
     is Source.UsbCamera -> copy(name = name)
+    is Source.PcInput -> copy(name = name)
     is Source.Screen -> copy(name = name)
     is Source.Image -> copy(name = name)
     is Source.Text -> copy(name = name)

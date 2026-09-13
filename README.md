@@ -29,6 +29,11 @@ Pestaña **DESTINOS** → **+** → pega el enlace de conexión (`rtmp://…`, `
 la plataforma. Nexo detecta de qué servicio es, separa servidor y clave y avisa si el servidor no
 pertenece a la plataforma elegida. También puedes *compartir* el enlace con la app desde otra aplicación.
 
+### Jugar en el PC y emitir desde el móvil
+
+Sin capturadora: OBS envía la pantalla y el sonido del PC al móvil por WiFi o por cable USB, y Nexo Live
+los mezcla con tu cámara y hace el directo. Guía paso a paso en [docs/PC.md](docs/PC.md).
+
 ### Protección contra el sobrecalentamiento
 
 Nexo combina el estado térmico del sistema, el margen previsto (`getThermalHeadroom`) y la temperatura

@@ -56,6 +56,7 @@ import com.nexo.live.engine.model.Source
 import com.nexo.live.engine.model.TextAlignment
 import com.nexo.live.engine.model.Transform
 import com.nexo.live.engine.model.kind
+import com.nexo.live.engine.pclink.PcLinkAddresses
 import com.nexo.live.ui.destinations.Callout
 import com.nexo.live.ui.destinations.ChoiceRow
 import com.nexo.live.ui.destinations.NexoField
@@ -107,6 +108,7 @@ fun SourcePropertiesDialog(
                 when (source) {
                     is Source.Camera -> CameraSection(source, model.cameras, onUpdate)
                     is Source.UsbCamera -> UsbCameraSection(source, model.usbCameras, onUpdate)
+                    is Source.PcInput -> PcInputSection(source, onUpdate)
                     is Source.Screen -> ScreenSection(model.screenCaptureActive, onRequestScreenCapture)
                     is Source.Text -> TextSection(source, onUpdate)
                     is Source.SolidColor -> {
@@ -181,6 +183,48 @@ private fun UsbCameraSection(source: Source.UsbCamera, devices: List<UsbCameraEn
     OrientationControls(source.rotationOffset, source.mirror,
         onRotation = { onUpdate(source.copy(rotationOffset = it)) },
         onMirror = { onUpdate(source.copy(mirror = it)) })
+}
+
+@Composable
+private fun PcInputSection(source: Source.PcInput, onUpdate: (Source) -> Unit) {
+    val addresses = remember { PcLinkAddresses.localAddresses() }
+    SectionLabel("CONEXIÓN CON EL PC")
+    Text(
+        "Juega en el PC y emite desde el móvil sin capturadora. OBS envía la pantalla y el sonido del PC al móvil por WiFi o por cable USB.",
+        color = Nexo.colors.textMid,
+    )
+    SectionLabel("PUERTO")
+    Chips(listOf(9000, 9001, 9002, 9003), source.port, { "$it" }) { onUpdate(source.copy(port = it)) }
+
+    SectionLabel("DIRECCIÓN PARA OBS")
+    if (addresses.isEmpty()) {
+        Callout("El móvil no tiene red. Conéctalo a la misma WiFi que el PC o activa el anclaje USB.", Nexo.colors.record)
+    }
+    addresses.forEach { address ->
+        Column(Modifier.fillMaxWidth().background(Nexo.colors.panel, RoundedCornerShape(Nexo.metrics.radiusSmall)).padding(12.dp)) {
+            Text(address.label, style = Nexo.numeric, color = Nexo.colors.textLow)
+            Text("tcp://${address.ip}:${source.port}", color = Nexo.colors.volt)
+        }
+    }
+
+    SectionLabel("CONFIGURAR OBS EN EL PC (UNA SOLA VEZ)")
+    listOf(
+        "1. Ajustes → Salida → Modo de salida: Avanzado.",
+        "2. Pestaña Grabación → Tipo: Salida personalizada (FFmpeg).",
+        "3. Tipo de salida FFmpeg: Enviar a URL. URL: la dirección de arriba.",
+        "4. Formato del contenedor: mpegts. Codificador de vídeo: el de tu gráfica (NVENC, AMF o QSV) H.264, 8000–12000 kbps, fotograma clave cada 1 s.",
+        "5. Codificador de audio: AAC, 160 kbps. Pulsa Aceptar.",
+        "6. Con esta fuente añadida en Nexo, pulsa «Iniciar grabación» en OBS.",
+    ).forEach { Text(it, color = Nexo.colors.textHigh) }
+    Callout(
+        "Por cable: activa en el móvil Ajustes → Conexiones → Zona WiFi y anclaje → Anclaje USB y usa la dirección «Cable USB». " +
+            "Es la opción con menos retardo y sin cortes.",
+        Nexo.colors.textMid,
+    )
+    Text(
+        "La grabación de OBS no guarda nada en el PC: solo envía la señal al móvil. Si se corta, vuelve a pulsar «Iniciar grabación».",
+        style = Nexo.numeric, color = Nexo.colors.textLow,
+    )
 }
 
 @Composable

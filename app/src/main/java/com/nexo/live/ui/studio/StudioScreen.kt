@@ -72,8 +72,9 @@ fun StudioScreen(vm: StudioViewModel, destinationsVm: DestinationsViewModel, onR
     }
     val requestScreenCapture = { screenCapture.launch(vm.screenCaptureIntent()) }
 
-    // La pantalla no se apaga sola mientras se emite o se graba
-    LocalView.current.keepScreenOn = state.isLive || state.isRecording
+    // La pantalla no se apaga sola mientras se emite o se graba (ni con el estudio abierto, si así se ajusta)
+    val keepOnSettings by vm.settings.collectAsStateWithLifecycle()
+    LocalView.current.keepScreenOn = state.isLive || state.isRecording || keepOnSettings.video.keepScreenOn
 
     // Recolección secuencial: consumir el aviso no cancela el snackbar que se está mostrando
     LaunchedEffect(Unit) {

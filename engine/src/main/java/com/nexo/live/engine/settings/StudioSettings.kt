@@ -40,6 +40,8 @@ data class VideoSettings(
     val adaptiveBitrate: Boolean = true,
     /** La vista previa puede ir más lenta que la salida para ahorrar batería y calor. */
     val previewFps: Int = 30,
+    /** Con el estudio abierto la pantalla no se apaga (al emitir o grabar nunca se apaga). */
+    val keepScreenOn: Boolean = true,
 ) {
     companion object {
         val RESOLUTIONS = listOf(

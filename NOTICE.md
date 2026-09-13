@@ -22,6 +22,7 @@ reutilizarse bajo GPLv2 en proyectos que no incluyan esas dependencias.
 | [AndroidX / Jetpack Compose](https://developer.android.com/jetpack/androidx) | Apache 2.0 | Interfaz y ciclo de vida |
 | [Kotlin y kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines) | Apache 2.0 | Lenguaje y concurrencia |
 | [RootEncoder](https://github.com/pedroSG94/RootEncoder) | Apache 2.0 | Protocolos RTMP, RTMPS y SRT |
+| [AndroidX Media3](https://github.com/androidx/media) | Apache 2.0 | Recepción y decodificación de la señal del PC |
 | [UVCAndroid](https://github.com/shiyinghan/UVCAndroid) | Apache 2.0 (incluye libuvc, BSD-3-Clause, y libusb, LGPL-2.1) | Webcams y capturadoras HDMI por USB (UVC) |
 
 Los servidores de ingest del catálogo de plataformas se contrastaron con la lista pública de servicios de

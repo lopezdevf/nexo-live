@@ -385,6 +385,7 @@ class Compositor(
     private fun identityOf(source: Source): Any = when (source) {
         is Source.Camera -> listOf("camera", source.cameraId, source.facing)
         is Source.UsbCamera -> listOf("usb", source.deviceName)
+        is Source.PcInput -> listOf("pc", source.port)
         is Source.Screen -> "screen"
         is Source.SolidColor -> "color"
         is Source.Image, is Source.Text -> "bitmap"

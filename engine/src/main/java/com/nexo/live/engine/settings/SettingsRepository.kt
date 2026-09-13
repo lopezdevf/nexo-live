@@ -61,7 +61,7 @@ class SettingsRepository(context: Context) {
                 .put("width", s.video.width).put("height", s.video.height).put("fps", s.video.fps)
                 .put("bitrate", s.video.bitrateKbps).put("keyframe", s.video.keyframeSec)
                 .put("codec", s.video.codec.name).put("adaptive", s.video.adaptiveBitrate)
-                .put("previewFps", s.video.previewFps))
+                .put("previewFps", s.video.previewFps).put("keepScreenOn", s.video.keepScreenOn))
             .put("audio", JSONObject()
                 .put("sampleRate", s.audio.sampleRate).put("bitrate", s.audio.bitrateKbps)
                 .put("allowSpeaker", s.audio.allowSpeakerMonitoring)
@@ -93,6 +93,7 @@ class SettingsRepository(context: Context) {
                     codec = enumOr(v.optString("codec"), d.video.codec),
                     adaptiveBitrate = v.optBoolean("adaptive", d.video.adaptiveBitrate),
                     previewFps = v.optInt("previewFps", d.video.previewFps),
+                    keepScreenOn = v.optBoolean("keepScreenOn", d.video.keepScreenOn),
                 ),
                 audio = AudioSettings(
                     sampleRate = a.optInt("sampleRate", d.audio.sampleRate),

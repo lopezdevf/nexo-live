@@ -147,6 +147,7 @@ private fun StatusBadgeOverlay(item: SceneItem, source: Source, status: CaptureS
     val t = item.transform
     val message = when (status) {
         CaptureStatus.Starting -> "Iniciando ${source.name}…"
+        is CaptureStatus.Waiting -> status.message
         is CaptureStatus.Error -> status.message
         CaptureStatus.Running -> return
     }

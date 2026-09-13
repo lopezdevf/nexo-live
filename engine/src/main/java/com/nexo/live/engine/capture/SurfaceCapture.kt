@@ -11,6 +11,8 @@ data class CaptureFormat(val width: Int, val height: Int, val rotationDegrees: I
 sealed interface CaptureStatus {
     data object Starting : CaptureStatus
     data object Running : CaptureStatus
+    /** Listo y esperando datos externos (p. ej. que el PC empiece a enviar). No se reintenta. */
+    data class Waiting(val message: String) : CaptureStatus
     data class Error(val message: String) : CaptureStatus
 }
 

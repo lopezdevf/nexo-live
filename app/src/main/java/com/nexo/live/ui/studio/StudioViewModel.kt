@@ -112,6 +112,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         val source = when (kind) {
             SourceKind.Camera -> Source.Camera(id, name, Facing.Back)
             SourceKind.UsbCamera -> Source.UsbCamera(id, name)
+            SourceKind.PcInput -> Source.PcInput(id, name, port = 9000 + count)
             SourceKind.Screen -> Source.Screen(id, name)
             SourceKind.Image -> return // se añade tras elegir la imagen
             SourceKind.Text -> Source.Text(id, name, text = "Texto nuevo", backgroundArgb = 0x99000000)
