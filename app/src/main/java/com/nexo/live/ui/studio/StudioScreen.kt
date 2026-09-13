@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
@@ -120,7 +122,7 @@ fun StudioScreen(vm: StudioViewModel, destinationsVm: DestinationsViewModel, onR
                 if (maxWidth > maxHeight) {
                     LandscapeStudio(state, dockTab, destinations, actions)
                 } else {
-                    PortraitStudio(state, dockTab, destinations, actions)
+                    PortraitStudio(state, dockTab, destinations, actions, maxHeight)
                 }
             }
         }
@@ -239,11 +241,13 @@ private fun LandscapeStudio(state: StudioState, dockTab: DockTab, destinations: 
 
 /** Vertical: lienzo arriba, controles bajo el pulgar y dock ocupando el resto. */
 @Composable
-private fun PortraitStudio(state: StudioState, dockTab: DockTab, destinations: DestinationsUi, actions: StudioActions) {
+private fun PortraitStudio(state: StudioState, dockTab: DockTab, destinations: DestinationsUi, actions: StudioActions, screenHeight: Dp) {
     val vm = actions.vm
     Column(Modifier.fillMaxSize()) {
         StatusStrip(state, compact = true, onSettings = { vm.openSettings(true) })
-        CanvasArea(state, vm, Modifier.fillMaxWidth().padding(horizontal = 8.dp))
+        // Un lienzo vertical en un móvil vertical sería más alto que la pantalla y taparía los controles:
+        // se limita su altura y la vista previa encaja dentro conservando la proporción
+        CanvasArea(state, vm, Modifier.fillMaxWidth().heightIn(max = screenHeight * 0.42f).padding(horizontal = 8.dp))
         TransportBar(state, destinations.enabledCount, vm::setStudioMode, vm::transition, vm::toggleRecording, actions.onGoLive)
         ScenesPanel(
             state = state,
