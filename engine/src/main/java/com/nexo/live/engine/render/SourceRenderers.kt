@@ -95,20 +95,18 @@ internal class Matrices {
 
 /** Dibuja una fuente dentro de su caja. Vive y muere en el hilo del compositor. */
 internal abstract class SourceRenderer(val sourceId: String) {
-    /** Fuente con la que se creó; si cambia algo que obliga a reabrir el dispositivo, se recrea. */
-    abstract val identity: Any
-
     open fun update(source: Source, boxWidthPx: Int, boxHeightPx: Int) = Unit
 
-    abstract fun draw(gl: GlRenderer, item: SceneItem, box: PixelRect, projection: FloatArray, alpha: Float, m: Matrices)
+    /** [source] se pasa en cada dibujado porque varias fuentes pueden compartir este renderizador. */
+    abstract fun draw(gl: GlRenderer, item: SceneItem, source: Source, box: PixelRect, projection: FloatArray, alpha: Float, m: Matrices)
 
     abstract fun release()
 }
 
-/** Cámara, cámara USB o pantalla: el productor escribe en una SurfaceTexture. */
+/** Cámara, cámara USB, pantalla o PC: el productor escribe en una SurfaceTexture compartida. */
 internal class ExternalRenderer(
     sourceId: String,
-    override val identity: Any,
+    private val key: String,
     private val capture: SurfaceCapture,
     private val onStatus: (String, CaptureStatus) -> Unit,
 ) : SourceRenderer(sourceId) {
@@ -119,8 +117,6 @@ internal class ExternalRenderer(
     @Volatile private var format: CaptureFormat? = null
     @Volatile private var frameAvailable = false
     private var hasFrame = false
-    private var rotationOffset = 0
-    private var mirror = false
 
     init {
         surfaceTexture.setOnFrameAvailableListener { frameAvailable = true }
@@ -129,16 +125,11 @@ internal class ExternalRenderer(
                 this@ExternalRenderer.format = format
             }
 
-            override fun onStatus(status: CaptureStatus) = onStatus(sourceId, status)
+            override fun onStatus(status: CaptureStatus) = onStatus(key, status)
         })
     }
 
     override fun update(source: Source, boxWidthPx: Int, boxHeightPx: Int) {
-        when (source) {
-            is Source.Camera -> { rotationOffset = source.rotationOffset; mirror = source.mirror }
-            is Source.UsbCamera -> { rotationOffset = source.rotationOffset; mirror = source.mirror }
-            else -> Unit
-        }
         if (frameAvailable) {
             frameAvailable = false
             surfaceTexture.updateTexImage()
@@ -147,9 +138,14 @@ internal class ExternalRenderer(
         }
     }
 
-    override fun draw(gl: GlRenderer, item: SceneItem, box: PixelRect, projection: FloatArray, alpha: Float, m: Matrices) {
+    override fun draw(gl: GlRenderer, item: SceneItem, source: Source, box: PixelRect, projection: FloatArray, alpha: Float, m: Matrices) {
         val f = format ?: return
         if (!hasFrame) return
+        val (rotationOffset, mirror) = when (source) {
+            is Source.Camera -> source.rotationOffset to source.mirror
+            is Source.UsbCamera -> source.rotationOffset to source.mirror
+            else -> 0 to false
+        }
         val rotation = (f.rotationDegrees + rotationOffset) % 360
         val (cw, ch) = Layout.rotatedSize(f.width, f.height, rotation)
         val placement = Layout.place(box, cw, ch, item.transform.crop, item.transform.fit)
@@ -176,7 +172,6 @@ internal class BitmapRenderer(
     private val maxLongSide: Int,
 ) : SourceRenderer(sourceId) {
 
-    override val identity: Any = "bitmap"
     private val textureId = GlRenderer.createTexture2d()
     private var currentKey: Any? = null
     private var width = 0
@@ -211,7 +206,7 @@ internal class BitmapRenderer(
         }
     }
 
-    override fun draw(gl: GlRenderer, item: SceneItem, box: PixelRect, projection: FloatArray, alpha: Float, m: Matrices) {
+    override fun draw(gl: GlRenderer, item: SceneItem, source: Source, box: PixelRect, projection: FloatArray, alpha: Float, m: Matrices) {
         if (currentKey == null) return
         val placement = Layout.place(box, width, height, item.transform.crop, item.transform.fit)
         gl.drawTexture(
@@ -275,14 +270,13 @@ internal class BitmapRenderer(
 }
 
 internal class ColorRenderer(sourceId: String) : SourceRenderer(sourceId) {
-    override val identity: Any = "color"
     private var argb: Long = 0xFF000000
 
     override fun update(source: Source, boxWidthPx: Int, boxHeightPx: Int) {
         if (source is Source.SolidColor) argb = source.argb
     }
 
-    override fun draw(gl: GlRenderer, item: SceneItem, box: PixelRect, projection: FloatArray, alpha: Float, m: Matrices) {
+    override fun draw(gl: GlRenderer, item: SceneItem, source: Source, box: PixelRect, projection: FloatArray, alpha: Float, m: Matrices) {
         gl.drawColor(m.mvp(projection, box, item.transform.rotation), argb, alpha)
     }
 

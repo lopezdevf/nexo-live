@@ -86,7 +86,18 @@ class StudioEngine(
 
     val projection = ScreenProjection(appContext)
 
-    val compositor = Compositor(studio, settings.settings, CaptureFactory { source, canvas -> createCapture(source, canvas) })
+    val compositor = Compositor(studio, settings.settings, object : CaptureFactory {
+        override fun keyFor(source: Source): String = when (source) {
+            // Por id real: «trasera principal» y «Cámara trasera (id 0)» son el mismo sensor
+            is Source.Camera -> "camera:${devices.cameraIdFor(source.facing, source.cameraId) ?: source.facing}"
+            is Source.UsbCamera -> "usb:${source.deviceName ?: "auto"}"
+            is Source.Screen -> "screen"
+            is Source.PcInput -> "pc:${source.port}"
+            else -> "src:${source.id}"
+        }
+
+        override fun create(source: Source, canvas: CanvasConfig) = createCapture(source, canvas)
+    })
 
     /** Receptores de vídeo y audio del PC, compartidos por compositor y mezclador. */
     val pcLink = PcLinkHub(appContext)
@@ -115,6 +126,7 @@ class StudioEngine(
     init {
         compositor.start()
         devices.start()
+        scope.launch(Dispatchers.IO) { recorder.deleteAbandoned() }
         scope.launch { settings.settings.collectLatest { applyLimits() } }
         // La franja superior refleja el estado combinado de todos los destinos
         scope.launch {

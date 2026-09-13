@@ -7,6 +7,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
@@ -114,7 +115,7 @@ fun PreviewCanvas(
                         StatusBadgeOverlay(item, source, status, widthPx, heightPx)
                     }
                 }
-                if (editable) currentSelected?.let { SelectionFrame(it, widthPx, heightPx) }
+                if (editable) currentSelected?.let { SelectionFrame(it, widthPx, heightPx, onTransform) }
             }
         }
     }
@@ -170,29 +171,108 @@ private fun StatusBadgeOverlay(item: SceneItem, source: Source, status: CaptureS
     }
 }
 
+/** Qué hace cada tirador: las esquinas redimensionan y los lados recortan (como Alt+arrastrar en OBS). */
+private enum class Handle(val alignment: Alignment, val crop: Boolean) {
+    TopStart(Alignment.TopStart, false), TopEnd(Alignment.TopEnd, false),
+    BottomStart(Alignment.BottomStart, false), BottomEnd(Alignment.BottomEnd, false),
+    Left(Alignment.CenterStart, true), Right(Alignment.CenterEnd, true),
+    Top(Alignment.TopCenter, true), Bottom(Alignment.BottomCenter, true),
+}
+
 @Composable
-private fun SelectionFrame(item: SceneItem, widthPx: Float, heightPx: Float) {
+private fun SelectionFrame(item: SceneItem, widthPx: Float, heightPx: Float, onTransform: (String, Transform) -> Unit) {
     val t = item.transform
     val accent = if (item.locked) Nexo.colors.textMid else Nexo.colors.volt
-    val handle = 10.dp
+    val latest by rememberUpdatedState(item)
+    val emit by rememberUpdatedState(onTransform)
     with(LocalDensity.current) {
+        // El marco crece medio tirador por cada lado para que los tiradores queden sobre el borde y se puedan tocar
+        val touch = 36.dp
+        val half = touch / 2
         Box(
             Modifier
-                .offset(x = (t.x * widthPx).toDp(), y = (t.y * heightPx).toDp())
-                .size(width = (t.width * widthPx).toDp(), height = (t.height * heightPx).toDp())
-                .border(2.dp, accent)
+                .offset(x = (t.x * widthPx).toDp() - half, y = (t.y * heightPx).toDp() - half)
+                .size(width = (t.width * widthPx).toDp() + touch, height = (t.height * heightPx).toDp() + touch)
         ) {
+            Box(Modifier.fillMaxSize().padding(half).border(2.dp, accent))
             if (!item.locked) {
-                listOf(Alignment.TopStart, Alignment.TopEnd, Alignment.BottomStart, Alignment.BottomEnd).forEach {
+                Handle.entries.forEach { handle ->
                     Box(
                         Modifier
-                            .align(it)
-                            .padding(1.dp)
-                            .size(handle)
-                            .background(accent, RoundedCornerShape(2.dp))
-                    )
+                            .align(handle.alignment)
+                            .size(touch)
+                            .pointerInput(item.id, handle) {
+                                var start = latest.transform
+                                var total = Offset.Zero
+                                detectDragGestures(
+                                    onDragStart = {
+                                        start = latest.transform
+                                        total = Offset.Zero
+                                    },
+                                ) { change, drag ->
+                                    change.consume()
+                                    total += drag
+                                    emit(latest.id, applyHandle(start, handle, total.x / widthPx, total.y / heightPx))
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val visual = if (handle.crop) Modifier.size(width = 14.dp, height = 6.dp).let {
+                            if (handle == Handle.Left || handle == Handle.Right) Modifier.size(width = 6.dp, height = 14.dp) else it
+                        } else Modifier.size(12.dp)
+                        Box(
+                            visual
+                                .background(if (handle.crop) Nexo.colors.textHigh else accent, RoundedCornerShape(2.dp))
+                                .border(1.dp, Nexo.colors.ink, RoundedCornerShape(2.dp))
+                        )
+                    }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Nuevo encuadre a partir del inicial y el arrastre acumulado (en fracciones del lienzo).
+ * Recortar también encoge la caja, así la imagen que queda no se deforma.
+ */
+private fun applyHandle(start: Transform, handle: Handle, dx: Float, dy: Float): Transform {
+    val min = Transform.MIN_SIZE
+    fun visibleW(c: com.nexo.live.engine.model.Crop) = (1f - c.left - c.right).coerceAtLeast(0.05f)
+    fun visibleH(c: com.nexo.live.engine.model.Crop) = (1f - c.top - c.bottom).coerceAtLeast(0.05f)
+    return when (handle) {
+        Handle.TopStart -> {
+            val w = (start.width - dx).coerceAtLeast(min); val h = (start.height - dy).coerceAtLeast(min)
+            start.copy(x = start.x + start.width - w, y = start.y + start.height - h, width = w, height = h)
+        }
+        Handle.TopEnd -> {
+            val w = (start.width + dx).coerceAtLeast(min); val h = (start.height - dy).coerceAtLeast(min)
+            start.copy(y = start.y + start.height - h, width = w, height = h)
+        }
+        Handle.BottomStart -> {
+            val w = (start.width - dx).coerceAtLeast(min); val h = (start.height + dy).coerceAtLeast(min)
+            start.copy(x = start.x + start.width - w, width = w, height = h)
+        }
+        Handle.BottomEnd -> start.copy(width = (start.width + dx).coerceAtLeast(min), height = (start.height + dy).coerceAtLeast(min))
+        Handle.Left -> {
+            val shrink = dx.coerceIn(-start.x.coerceAtMost(start.crop.left * start.width / visibleW(start.crop)), start.width - min)
+            val left = (start.crop.left + shrink / start.width * visibleW(start.crop)).coerceIn(0f, 0.9f - start.crop.right)
+            start.copy(x = start.x + shrink, width = start.width - shrink, crop = start.crop.copy(left = left))
+        }
+        Handle.Right -> {
+            val shrink = (-dx).coerceIn(-(start.crop.right * start.width / visibleW(start.crop)), start.width - min)
+            val right = (start.crop.right + shrink / start.width * visibleW(start.crop)).coerceIn(0f, 0.9f - start.crop.left)
+            start.copy(width = start.width - shrink, crop = start.crop.copy(right = right))
+        }
+        Handle.Top -> {
+            val shrink = dy.coerceIn(-(start.crop.top * start.height / visibleH(start.crop)), start.height - min)
+            val top = (start.crop.top + shrink / start.height * visibleH(start.crop)).coerceIn(0f, 0.9f - start.crop.bottom)
+            start.copy(y = start.y + shrink, height = start.height - shrink, crop = start.crop.copy(top = top))
+        }
+        Handle.Bottom -> {
+            val shrink = (-dy).coerceIn(-(start.crop.bottom * start.height / visibleH(start.crop)), start.height - min)
+            val bottom = (start.crop.bottom + shrink / start.height * visibleH(start.crop)).coerceIn(0f, 0.9f - start.crop.top)
+            start.copy(height = start.height - shrink, crop = start.crop.copy(bottom = bottom))
         }
     }
 }

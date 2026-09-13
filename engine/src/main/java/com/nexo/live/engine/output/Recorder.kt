@@ -3,12 +3,16 @@
 
 package com.nexo.live.engine.output
 
+import android.content.ContentResolver
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
+import android.os.Build
+import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.util.Log
@@ -42,6 +46,26 @@ class Recorder(context: Context) {
     private var samplesWritten = 0L
 
     val isRecording: Boolean get() = synchronized(lock) { muxer != null }
+
+    /**
+     * Borra grabaciones que quedaron «pendientes» por un cierre inesperado: sin su índice final
+     * no se pueden reproducir. Solo debe llamarse al arrancar, antes de grabar.
+     */
+    fun deleteAbandoned() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val args = Bundle().apply {
+            putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_ONLY)
+            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, "${MediaStore.Video.Media.DISPLAY_NAME} LIKE 'NexoLive_%'")
+        }
+        runCatching {
+            resolver.query(collection, arrayOf(MediaStore.Video.Media._ID), args, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    resolver.delete(ContentUris.withAppendedId(collection, cursor.getLong(0)), null, null)
+                }
+            }
+        }.onFailure { Log.w(TAG, "No se pudieron limpiar grabaciones pendientes", it) }
+    }
 
     /** Devuelve el nombre del archivo creado. Los formatos se pasan si los codificadores ya los emitieron. */
     fun start(folder: String, expectAudio: Boolean, video: MediaFormat?, audio: MediaFormat?): String = synchronized(lock) {

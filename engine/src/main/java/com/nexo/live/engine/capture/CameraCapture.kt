@@ -17,6 +17,7 @@ import android.hardware.camera2.params.SessionConfiguration
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Range
+import android.util.Log
 import android.util.Size
 import android.view.Surface
 import androidx.core.content.ContextCompat
@@ -74,7 +75,8 @@ class CameraCapture(
                             return
                         }
                         device = camera
-                        createSession(camera, target, chars, listener)
+                        runCatching { createSession(camera, target, chars, listener) }
+                            .onFailure { listener.onStatus(CaptureStatus.Error("No se pudo iniciar la cámara; reintentando…")) }
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
@@ -95,6 +97,18 @@ class CameraCapture(
         }
     }
 
+    /**
+     * TEMPLATE_RECORD da exposición estable para vídeo, pero algunas cámaras (p. ej. la frontal de
+     * ciertos Samsung) no lo implementan: entonces se usa TEMPLATE_PREVIEW, que es obligatorio.
+     */
+    private fun requestBuilder(camera: CameraDevice): CaptureRequest.Builder =
+        try {
+            camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+        } catch (e: Exception) {
+            Log.i(TAG, "Cámara $cameraId sin plantilla de grabación; se usa la de vista previa")
+            camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+        }
+
     private fun createSession(camera: CameraDevice, target: Surface, chars: CameraCharacteristics, listener: CaptureListener) {
         val config = SessionConfiguration(
             SessionConfiguration.SESSION_REGULAR,
@@ -107,14 +121,18 @@ class CameraCapture(
                         return
                     }
                     session = s
-                    val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
-                        addTarget(target)
-                        set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-                        bestFpsRange(chars)?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
-                    }.build()
-                    runCatching { s.setRepeatingRequest(request, null, handler) }
-                        .onSuccess { listener.onStatus(CaptureStatus.Running) }
-                        .onFailure { listener.onStatus(CaptureStatus.Error("La cámara rechazó la configuración")) }
+                    // Los callbacks de Camera2 corren en nuestro hilo: una excepción aquí cerraría la app entera
+                    try {
+                        val builder = requestBuilder(camera)
+                        builder.addTarget(target)
+                        builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                        bestFpsRange(chars)?.let { builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+                        s.setRepeatingRequest(builder.build(), null, handler)
+                        listener.onStatus(CaptureStatus.Running)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Cámara $cameraId: no se pudo iniciar la captura", e)
+                        listener.onStatus(CaptureStatus.Error("La cámara rechazó la configuración; reintentando…"))
+                    }
                 }
 
                 override fun onConfigureFailed(s: CameraCaptureSession) {
@@ -171,6 +189,10 @@ class CameraCapture(
         // Rango fijo si existe (fps estables para el codificador); si no, el que llegue a los fps pedidos
         return ranges.firstOrNull { it.lower == fps && it.upper == fps }
             ?: ranges.filter { it.upper >= fps }.maxByOrNull { it.lower }
+    }
+
+    private companion object {
+        const val TAG = "NexoCamera"
     }
 
     private fun errorMessage(error: Int) = when (error) {

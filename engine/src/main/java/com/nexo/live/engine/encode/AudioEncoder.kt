@@ -35,34 +35,37 @@ class AudioEncoder(private val listener: AudioEncoderListener) {
         }
     }
 
+    /** El mezclador codifica desde su hilo y la parada llega desde otro: nunca a la vez. */
+    private val lock = Any()
+
     /** [pcm] estéreo entrelazado; [ptsUs] en la misma base de tiempo que el vídeo (System.nanoTime / 1000). */
-    fun encode(pcm: ShortArray, ptsUs: Long) {
+    fun encode(pcm: ShortArray, ptsUs: Long): Unit = synchronized(lock) {
         val c = codec ?: return
-        var offset = 0
-        var pts = ptsUs
-        while (offset < pcm.size) {
-            val index = try {
-                c.dequeueInputBuffer(5_000)
-            } catch (e: IllegalStateException) {
-                return
+        try {
+            var offset = 0
+            var pts = ptsUs
+            while (offset < pcm.size) {
+                val index = c.dequeueInputBuffer(5_000)
+                if (index < 0) {
+                    drain(c) // codificador saturado: se vacía y se descarta el resto del bloque
+                    break
+                }
+                val buffer = c.getInputBuffer(index) ?: break
+                buffer.clear()
+                buffer.order(ByteOrder.nativeOrder())
+                val samples = minOf((pcm.size - offset), buffer.remaining() / 2)
+                buffer.asShortBuffer().put(pcm, offset, samples)
+                c.queueInputBuffer(index, 0, samples * 2, pts, 0)
+                offset += samples
+                pts += samples.toLong() / channels * 1_000_000L / sampleRate
+                drain(c)
             }
-            if (index < 0) {
-                drain(c) // codificador saturado: se vacía y se descarta el resto del bloque
-                break
-            }
-            val buffer = c.getInputBuffer(index) ?: break
-            buffer.clear()
-            buffer.order(ByteOrder.nativeOrder())
-            val samples = minOf((pcm.size - offset), buffer.remaining() / 2)
-            buffer.asShortBuffer().put(pcm, offset, samples)
-            c.queueInputBuffer(index, 0, samples * 2, pts, 0)
-            offset += samples
-            pts += samples.toLong() / channels * 1_000_000L / sampleRate
-            drain(c)
+        } catch (e: IllegalStateException) {
+            // El códec se detuvo o falló: se pierde este bloque, nunca la app
         }
     }
 
-    fun stop() {
+    fun stop(): Unit = synchronized(lock) {
         val c = codec ?: return
         codec = null
         runCatching { c.stop() }

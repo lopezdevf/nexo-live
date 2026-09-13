@@ -32,7 +32,10 @@ import java.util.concurrent.Executors
 /** Superficies de vista previa: la de edición y, en modo estudio, la del programa. */
 enum class PreviewSlot { Edit, Program }
 
-fun interface CaptureFactory {
+interface CaptureFactory {
+    /** Identifica el dispositivo físico que usa la fuente (p. ej. «camera:1»). */
+    fun keyFor(source: Source): String
+
     /** null si la fuente no captura de un dispositivo (imagen, texto, color). */
     fun create(source: Source, canvas: CanvasConfig): SurfaceCapture?
 }
@@ -61,6 +64,8 @@ class Compositor(
     private val lastUsed = HashMap<String, Long>()
     private val createdAt = HashMap<String, Long>()
     private val retries = HashMap<String, Int>()
+    /** Estado de cada captura (por clave de dispositivo); lo escriben los hilos de captura. */
+    private val keyStatus = java.util.concurrent.ConcurrentHashMap<String, CaptureStatus>()
     private val projection = FloatArray(16)
     private val matrices = Matrices()
     private var running = false
@@ -297,12 +302,12 @@ class Compositor(
     private fun drawItems(gl: GlRenderer, fb: Framebuffer, state: com.nexo.live.engine.studio.StudioState, scene: Scene, alpha: Float) {
         for (item in scene.items) {
             if (!item.visible) continue
-            val renderer = renderers[item.sourceId] ?: continue
             val source = state.sources[item.sourceId] ?: continue
+            val renderer = renderers[keyOf(source)] ?: continue
             val t = item.transform
             val box = PixelRect(t.x * fb.width, t.y * fb.height, t.width * fb.width, t.height * fb.height)
             renderer.update(source, box.width.toInt(), box.height.toInt())
-            renderer.draw(gl, item, box, projection, (t.opacity * alpha).coerceIn(0f, 1f), matrices)
+            renderer.draw(gl, item, source, box, projection, (t.opacity * alpha).coerceIn(0f, 1f), matrices)
         }
     }
 
@@ -317,58 +322,81 @@ class Compositor(
         gl.drawTexture(fb.textureId, isExternal = false, mvp = matrices.mvp(projection, quad, 0f), texMatrix = matrices.framebufferTex(), alpha = 1f)
     }
 
-    /** Crea las fuentes visibles, recrea las que cambiaron de dispositivo y cierra las que nadie usa. */
+    /**
+     * Clave del renderizador: las fuentes que usan el mismo dispositivo físico (misma cámara, la
+     * pantalla, el mismo puerto del PC) comparten una sola captura. Abrir dos veces una cámara hace
+     * que Android expulse a la primera y ambas entran en un bucle de reconexión.
+     */
+    private fun keyOf(source: Source): String = when (source) {
+        is Source.Image, is Source.Text, is Source.SolidColor -> "src:${source.id}"
+        else -> captureFactory.keyFor(source)
+    }
+
+    /** Crea las capturas visibles, recrea las que fallaron y cierra las que nadie usa. */
     private fun syncRenderers(state: com.nexo.live.engine.studio.StudioState, outgoing: Scene?, canvas: CanvasConfig) {
         val nowMs = SystemClock.uptimeMillis()
         val scenes = listOfNotNull(state.programScene, if (state.studioMode) state.previewScene else null, outgoing)
-        val used = scenes.flatMap { s -> s.items.filter { it.visible }.map { it.sourceId } }.toSet()
+        val usedSources = scenes.flatMap { s -> s.items.filter { it.visible }.mapNotNull { state.sources[it.sourceId] } }
+            .filter { it.hasVideo }
+            .distinctBy { it.id }
+        val usedKeys = HashMap<String, Source>()
+        for (source in usedSources) usedKeys.putIfAbsent(keyOf(source), source)
 
-        for (id in used) {
-            val source = state.sources[id] ?: continue
+        for ((key, source) in usedKeys) {
+            lastUsed[key] = nowMs
+            if (renderers.containsKey(key) && !retryDue(key, nowMs)) continue
+            renderers.remove(key)?.release()
+            keyStatus.remove(key)
+            renderers[key] = createRenderer(key, source, canvas)
+            createdAt[key] = nowMs
+        }
+
+        val liveKeys = state.sources.values.filter { it.hasVideo }.map { keyOf(it) }.toSet()
+        val stale = renderers.keys.filter { (it !in usedKeys && nowMs - (lastUsed[it] ?: 0L) > UNUSED_RELEASE_MS) || it !in liveKeys }
+        for (key in stale) {
+            renderers.remove(key)?.release()
+            lastUsed.remove(key)
+            createdAt.remove(key)
+            retries.remove(key)
+            keyStatus.remove(key)
+        }
+        publishStatus(state)
+    }
+
+    /** Traduce el estado de cada captura compartida a cada fuente que la usa. */
+    private fun publishStatus(state: com.nexo.live.engine.studio.StudioState) {
+        val bySource = HashMap<String, CaptureStatus>()
+        for (source in state.sources.values) {
             if (!source.hasVideo) continue
-            lastUsed[id] = nowMs
-            val existing = renderers[id]
-            val identity = identityOf(source)
-            if (existing != null && existing.identity == identity && !retryDue(id, nowMs)) continue
-            existing?.release()
-            renderers[id] = createRenderer(source, identity, canvas)
-            createdAt[id] = nowMs
+            keyStatus[keyOf(source)]?.let { bySource[source.id] = it }
         }
-
-        val stale = renderers.keys.filter { it !in used && nowMs - (lastUsed[it] ?: 0L) > UNUSED_RELEASE_MS || state.sources[it] == null }
-        for (id in stale) {
-            renderers.remove(id)?.release()
-            lastUsed.remove(id)
-            createdAt.remove(id)
-            retries.remove(id)
-            _sourceStatus.update { it - id }
-        }
+        if (bySource != _sourceStatus.value) _sourceStatus.value = bySource
     }
 
     /**
      * Una captura con error (permiso aún no concedido, cámara ocupada, USB desconectado) se
      * reintenta sola con espera creciente: 3 s, 6 s, 12 s… hasta 30 s.
      */
-    private fun retryDue(id: String, nowMs: Long): Boolean {
-        val status = _sourceStatus.value[id]
-        if (status is CaptureStatus.Running) retries.remove(id)
+    private fun retryDue(key: String, nowMs: Long): Boolean {
+        val status = keyStatus[key]
+        if (status is CaptureStatus.Running) retries.remove(key)
         if (status !is CaptureStatus.Error) return false
-        val attempt = retries[id] ?: 0
+        val attempt = retries[key] ?: 0
         val wait = minOf(RETRY_BASE_MS shl attempt.coerceAtMost(4), RETRY_MAX_MS)
-        if (nowMs - (createdAt[id] ?: 0L) < wait) return false
-        retries[id] = attempt + 1
+        if (nowMs - (createdAt[key] ?: 0L) < wait) return false
+        retries[key] = attempt + 1
         return true
     }
 
     /** Reintenta ya todas las fuentes con error (p. ej. justo después de conceder permisos). */
     fun retryFailedSources() = post {
         retries.clear()
-        createdAt.keys.toList().forEach { id ->
-            if (_sourceStatus.value[id] is CaptureStatus.Error) createdAt[id] = 0L
+        createdAt.keys.toList().forEach { key ->
+            if (keyStatus[key] is CaptureStatus.Error) createdAt[key] = 0L
         }
     }
 
-    private fun createRenderer(source: Source, identity: Any, canvas: CanvasConfig): SourceRenderer {
+    private fun createRenderer(key: String, source: Source, canvas: CanvasConfig): SourceRenderer {
         val longSide = maxOf(canvas.width, canvas.height)
         return when (source) {
             is Source.SolidColor -> ColorRenderer(source.id)
@@ -376,20 +404,9 @@ class Compositor(
             else -> {
                 val capture = captureFactory.create(source, canvas)
                 if (capture == null) ColorRenderer(source.id)
-                else ExternalRenderer(source.id, identity, capture) { id, status -> _sourceStatus.update { it + (id to status) } }
+                else ExternalRenderer(source.id, key, capture) { _, status -> keyStatus[key] = status }
             }
         }
-    }
-
-    /** Cambios que obligan a reabrir el dispositivo; el resto se aplica en caliente. */
-    private fun identityOf(source: Source): Any = when (source) {
-        is Source.Camera -> listOf("camera", source.cameraId, source.facing)
-        is Source.UsbCamera -> listOf("usb", source.deviceName)
-        is Source.PcInput -> listOf("pc", source.port)
-        is Source.Screen -> "screen"
-        is Source.SolidColor -> "color"
-        is Source.Image, is Source.Text -> "bitmap"
-        else -> "none"
     }
 
     private fun releaseRenderers() {
@@ -398,6 +415,7 @@ class Compositor(
         lastUsed.clear()
         createdAt.clear()
         retries.clear()
+        keyStatus.clear()
         _sourceStatus.value = emptyMap()
     }
 

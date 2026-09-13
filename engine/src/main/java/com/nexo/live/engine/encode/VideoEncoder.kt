@@ -94,26 +94,26 @@ class VideoEncoder(private val listener: VideoEncoderListener) {
 
     private fun drain(codec: MediaCodec, hevc: Boolean) {
         val info = MediaCodec.BufferInfo()
-        while (running) {
-            val index = try {
-                codec.dequeueOutputBuffer(info, 10_000)
-            } catch (e: IllegalStateException) {
-                break
-            }
-            when {
-                index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> emitConfig(codec.outputFormat, hevc)
-                index >= 0 -> {
-                    val buffer = codec.getOutputBuffer(index)
-                    val isConfig = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
-                    if (buffer != null && info.size > 0 && !isConfig) {
-                        buffer.position(info.offset)
-                        buffer.limit(info.offset + info.size)
-                        listener.onVideoFrame(buffer, info)
+        try {
+            while (running) {
+                val index = codec.dequeueOutputBuffer(info, 10_000)
+                when {
+                    index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> emitConfig(codec.outputFormat, hevc)
+                    index >= 0 -> {
+                        val buffer = codec.getOutputBuffer(index)
+                        val isConfig = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
+                        if (buffer != null && info.size > 0 && !isConfig) {
+                            buffer.position(info.offset)
+                            buffer.limit(info.offset + info.size)
+                            listener.onVideoFrame(buffer, info)
+                        }
+                        codec.releaseOutputBuffer(index, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
                     }
-                    codec.releaseOutputBuffer(index, false)
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
                 }
             }
+        } catch (e: IllegalStateException) {
+            // El códec se detuvo mientras se vaciaba: fin normal de la salida
         }
     }
 
