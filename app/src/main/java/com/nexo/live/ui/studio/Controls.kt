@@ -1,0 +1,176 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 Nexo Live contributors
+
+package com.nexo.live.ui.studio
+
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.ViewColumn
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.nexo.live.engine.model.LiveStatus
+import com.nexo.live.engine.studio.StudioState
+import com.nexo.live.ui.theme.Nexo
+
+/** Franja superior: estado de emisión y telemetría, siempre legible de un vistazo. */
+@Composable
+fun StatusStrip(state: StudioState, compact: Boolean, modifier: Modifier = Modifier) {
+    val c = Nexo.colors
+    Row(
+        modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text("NEXO", style = Nexo.panelLabel, color = c.volt)
+        StatusBadge(
+            label = when (val live = state.live) {
+                LiveStatus.Offline -> "FUERA DE AIRE"
+                LiveStatus.Connecting -> "CONECTANDO"
+                is LiveStatus.Live -> "EN DIRECTO"
+                is LiveStatus.Reconnecting -> "RECONECTANDO ${live.attempt}"
+                is LiveStatus.Failed -> "ERROR"
+            },
+            color = if (state.isLive) c.live else c.textLow,
+            pulsing = state.isLive,
+        )
+        if (state.isRecording) StatusBadge("REC", c.record, pulsing = true)
+        Box(Modifier.weight(1f))
+        if (!compact) {
+            Metric("${state.canvas.width}×${state.canvas.height}")
+            Metric("${state.canvas.fps} fps")
+        }
+        Metric("${state.stats.bitrateKbps} kbps")
+        Metric("${state.stats.droppedFrames} perdidos", warn = state.stats.droppedFrames > 0)
+    }
+}
+
+@Composable
+private fun StatusBadge(label: String, color: Color, pulsing: Boolean) {
+    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
+        initialValue = 1f,
+        targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        label = "pulse",
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).alpha(if (pulsing) pulse else 1f).background(color, CircleShape))
+        Text(label, style = Nexo.panelLabel, color = color, modifier = Modifier.padding(start = 6.dp))
+    }
+}
+
+@Composable
+private fun Metric(text: String, warn: Boolean = false) {
+    Text(text, style = Nexo.numeric, color = if (warn) Nexo.colors.record else Nexo.colors.textMid, maxLines = 1)
+}
+
+/** Botonera de realización: modo estudio, transición, grabar y emitir. */
+@Composable
+fun TransportBar(
+    state: StudioState,
+    destinationCount: Int,
+    onStudioMode: (Boolean) -> Unit,
+    onTransition: () -> Unit,
+    onRecord: () -> Unit,
+    onGoLive: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val c = Nexo.colors
+    Row(
+        modifier.fillMaxWidth().padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TransportButton(
+            label = "Estudio",
+            icon = { Icon(Icons.Outlined.ViewColumn, null, tint = if (state.studioMode) c.onVolt else c.textMid, modifier = Modifier.size(18.dp)) },
+            background = if (state.studioMode) c.volt else Color.Transparent,
+            content = if (state.studioMode) c.onVolt else c.textMid,
+            onClick = { onStudioMode(!state.studioMode) },
+        )
+        if (state.studioMode) {
+            TransportButton(
+                label = "Transición",
+                icon = { Icon(Icons.Outlined.SwapHoriz, null, tint = c.textHigh, modifier = Modifier.size(18.dp)) },
+                background = c.raised,
+                content = c.textHigh,
+                onClick = onTransition,
+            )
+        }
+        Box(Modifier.weight(1f))
+        TransportButton(
+            label = if (state.isRecording) "Detener" else "Grabar",
+            icon = { Box(Modifier.size(10.dp).background(c.record, if (state.isRecording) RoundedCornerShape(2.dp) else CircleShape)) },
+            background = Color.Transparent,
+            content = c.textHigh,
+            onClick = onRecord,
+        )
+        TransportButton(
+            label = when {
+                state.isLive -> "Terminar"
+                destinationCount > 1 -> "Emitir · $destinationCount"
+                else -> "Emitir"
+            },
+            icon = null,
+            background = c.live,
+            content = Color.White,
+            onClick = onGoLive,
+            emphasized = true,
+        )
+    }
+}
+
+@Composable
+private fun TransportButton(
+    label: String,
+    icon: (@Composable () -> Unit)?,
+    background: Color,
+    content: Color,
+    onClick: () -> Unit,
+    emphasized: Boolean = false,
+) {
+    val shape = RoundedCornerShape(Nexo.metrics.radiusSmall)
+    Row(
+        Modifier
+            .height(40.dp)
+            .clip(shape)
+            .background(background)
+            .border(Nexo.metrics.hairline, if (background == Color.Transparent) Nexo.colors.line else background, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = if (emphasized) 22.dp else 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        icon?.invoke()
+        Text(label.uppercase(), color = content, fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 1.sp)
+    }
+}
