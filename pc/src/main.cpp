@@ -109,33 +109,48 @@ void CreateFonts() {
 
 // ---- Diseño --------------------------------------------------------------------------------
 
+// Tamaños en DIP del área de cliente. La ventana se puede agrandar: la columna crece hasta kMaxContent y se
+// centra, y la altura que sobra se la queda la lista de móviles
 constexpr int kWidth = 440;
+constexpr int kHeight = 740;
 constexpr int kMargin = 24;
+constexpr int kMaxContent = 600;
+constexpr int kMaxExtraList = 260;
 
 struct Layout {
+    int left;  // borde izquierdo de la columna, en DIP
     RECT phonesLabel, phones, refresh, addressLabel, address, codeLabel, code, monitorLabel, monitor, qualityLabel, quality, audio, cursor, connect, status;
 };
 
 RECT R(int x, int y, int w, int h) { return {S(x), S(y), S(x + w), S(y + h)}; }
 
 Layout ComputeLayout() {
-    const int inner = kWidth - kMargin * 2;
+    RECT client{};
+    if (app.hwnd) GetClientRect(app.hwnd, &client);
+    const int width = std::max(kWidth, MulDiv(client.right, 96, static_cast<int>(app.dpi)));
+    const int height = std::max(kHeight, MulDiv(client.bottom, 96, static_cast<int>(app.dpi)));
+    const int inner = std::min(width - kMargin * 2, kMaxContent);
+    const int x = (width - inner) / 2;
+    const int extra = std::min(height - kHeight, kMaxExtraList);
+    const int codeWidth = 126;
     Layout l{};
-    l.phonesLabel = R(kMargin, 92, inner, 18);
-    l.phones = R(kMargin, 114, inner, 140);
-    l.refresh = R(kMargin, 262, 150, 32);
-    l.addressLabel = R(kMargin, 310, 250, 18);
-    l.address = R(kMargin, 332, 250, 34);
-    l.codeLabel = R(kMargin + 266, 310, inner - 266, 18);
-    l.code = R(kMargin + 266, 332, inner - 266, 34);
-    l.monitorLabel = R(kMargin, 382, inner, 18);
-    l.monitor = R(kMargin, 404, inner, 300);
-    l.qualityLabel = R(kMargin, 450, inner, 18);
-    l.quality = R(kMargin, 472, inner, 300);
-    l.audio = R(kMargin, 520, inner, 30);
-    l.cursor = R(kMargin, 554, inner, 30);
-    l.connect = R(kMargin, 604, inner, 46);
-    l.status = R(kMargin, 662, inner, 64);
+    l.left = x;
+    l.phonesLabel = R(x, 92, inner, 18);
+    l.phones = R(x, 114, inner, 140 + extra);
+    const int y = extra;  // todo lo que va debajo de la lista baja lo que ella crece
+    l.refresh = R(x, 262 + y, 150, 32);
+    l.addressLabel = R(x, 310 + y, inner - codeWidth - 16, 18);
+    l.address = R(x, 332 + y, inner - codeWidth - 16, 34);
+    l.codeLabel = R(x + inner - codeWidth, 310 + y, codeWidth, 18);
+    l.code = R(x + inner - codeWidth, 332 + y, codeWidth, 34);
+    l.monitorLabel = R(x, 382 + y, inner, 18);
+    l.monitor = R(x, 404 + y, inner, 300);
+    l.qualityLabel = R(x, 450 + y, inner, 18);
+    l.quality = R(x, 472 + y, inner, 300);
+    l.audio = R(x, 520 + y, inner, 30);
+    l.cursor = R(x, 554 + y, inner, 30);
+    l.connect = R(x, 604 + y, inner, 46);
+    l.status = R(x, 662 + y, inner, std::max(64, height - (662 + y) - 12));
     return l;
 }
 
@@ -166,9 +181,16 @@ void ApplyLayout() {
     InvalidateRect(app.hwnd, nullptr, TRUE);
 }
 
+/** Tamaño de ventana para un área de cliente de [dipWidth]×[dipHeight] con el DPI actual. */
+SIZE WindowSizeFor(int dipWidth, int dipHeight) {
+    RECT rc = R(0, 0, dipWidth, dipHeight);
+    AdjustWindowRectExForDpi(&rc, WS_OVERLAPPEDWINDOW, FALSE, 0, app.dpi);
+    return {rc.right - rc.left, rc.bottom - rc.top};
+}
+
 void ResizeWindow() {
-    RECT rc = R(0, 0, kWidth, 740);
-    AdjustWindowRectExForDpi(&rc, WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX), FALSE, 0, app.dpi);
+    RECT rc = R(0, 0, kWidth, kHeight);
+    AdjustWindowRectExForDpi(&rc, WS_OVERLAPPEDWINDOW, FALSE, 0, app.dpi);
     int width = rc.right - rc.left;
     int height = rc.bottom - rc.top;
     // Que la ventana entera quepa sobre la barra de tareas
@@ -385,7 +407,7 @@ void PaintWindow(HDC dc) {
         g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
         const Gdiplus::REAL height = static_cast<Gdiplus::REAL>(S(38));
         const Gdiplus::REAL scale = height / brand::kMarkHeight;
-        const Gdiplus::REAL x0 = static_cast<Gdiplus::REAL>(S(kMargin)) + (static_cast<Gdiplus::REAL>(S(32)) - brand::kMarkWidth * scale) / 2;
+        const Gdiplus::REAL x0 = static_cast<Gdiplus::REAL>(S(l.left)) + (static_cast<Gdiplus::REAL>(S(32)) - brand::kMarkWidth * scale) / 2;
         const Gdiplus::REAL y0 = static_cast<Gdiplus::REAL>(S(22));
         Gdiplus::GraphicsPath path(Gdiplus::FillModeAlternate);
         const brand::MarkPoint* point = brand::kMarkPoints;
@@ -403,8 +425,8 @@ void PaintWindow(HDC dc) {
         brush.SetInterpolationColors(colors, positions, 3);
         g.FillPath(&brush, &path);
     }
-    DrawText(dc, L"Sirga Studio PC", R(kMargin + 44, 18, 300, 32), app.fontTitle, kTextHigh, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
-    DrawText(dc, L"Envía la pantalla y el sonido de este PC a tu móvil.", R(kMargin + 44, 50, 340, 22), app.fontSmall, kTextMid,
+    DrawText(dc, L"Sirga Studio PC", R(l.left + 44, 18, 300, 32), app.fontTitle, kTextHigh, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+    DrawText(dc, L"Envía la pantalla y el sonido de este PC a tu móvil.", R(l.left + 44, 50, 360, 22), app.fontSmall, kTextMid,
              DT_LEFT | DT_SINGLELINE);
 
     DrawText(dc, L"MÓVIL", l.phonesLabel, app.fontLabel, kTextLow, DT_LEFT | DT_SINGLELINE);
@@ -593,8 +615,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             SetWindowPos(hwnd, nullptr, suggested->left, suggested->top, suggested->right - suggested->left, suggested->bottom - suggested->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
             CreateFonts();
-            ResizeWindow();
             ApplyLayout();
+            return 0;
+        }
+        case WM_SIZE:
+            if (app.phones && wParam != SIZE_MINIMIZED) ApplyLayout();
+            return 0;
+        case WM_GETMINMAXINFO: {
+            // Por debajo del tamaño de diseño los controles se solaparían
+            if (!app.hwnd) break;
+            SIZE min = WindowSizeFor(kWidth, kHeight);
+            auto info = reinterpret_cast<MINMAXINFO*>(lParam);
+            info->ptMinTrackSize.x = min.cx;
+            info->ptMinTrackSize.y = min.cy;
             return 0;
         }
         case WM_ERASEBKGND:
@@ -748,7 +781,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     wc.lpszClassName = L"SirgaStudioPC";
     RegisterClassExW(&wc);
 
-    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Sirga Studio PC", WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX), CW_USEDEFAULT, CW_USEDEFAULT,
+    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Sirga Studio PC", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                                 480, 780, nullptr, nullptr, instance, nullptr);
     // Abierta desde otro programa sin ventana, Windows puede pedir SW_HIDE: se muestra igualmente
     ShowWindow(hwnd, show == SW_HIDE || show == SW_SHOWMINNOACTIVE ? SW_SHOWNORMAL : show);
