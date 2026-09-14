@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #pragma once
 
 #include "Common.h"
@@ -8,7 +8,7 @@
 #include <functional>
 #include <thread>
 
-namespace nexo {
+namespace senda {
 
 /**
  * Captura lo que suena en el PC (WASAPI en modo loopback del altavoz predeterminado), ya
@@ -33,4 +33,4 @@ private:
     std::thread thread_;
 };
 
-}  // namespace nexo
+}  // namespace senda

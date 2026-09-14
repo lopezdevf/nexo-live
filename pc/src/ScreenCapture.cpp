@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #include "ScreenCapture.h"
 
 #include <dxgi1_6.h>
@@ -11,7 +11,7 @@
 
 #include <algorithm>
 
-namespace nexo {
+namespace senda {
 
 using namespace winrt::Windows::Graphics::Capture;
 using namespace winrt::Windows::Graphics::DirectX;
@@ -167,4 +167,4 @@ void ScreenCapture::OnFrameArrived(Direct3D11CaptureFramePool const& pool, winrt
     if (onFrame_) onFrame_(texture.get(), captureUs);
 }
 
-}  // namespace nexo
+}  // namespace senda

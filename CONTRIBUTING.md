@@ -1,4 +1,4 @@
-# Cómo contribuir a Nexo Live
+# Cómo contribuir a Senda Studio
 
 ¡Gracias por querer ayudar! Estas pautas mantienen el proyecto coherente.
 
@@ -18,7 +18,7 @@
 
   ```kotlin
   // SPDX-License-Identifier: GPL-2.0-or-later
-  // Copyright (C) 2026 Nexo Live contributors
+  // Copyright (C) 2026 Senda Studio contributors
   ```
 
 - Nada de analíticas, rastreadores ni dependencias propietarias.

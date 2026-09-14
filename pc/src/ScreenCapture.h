@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #pragma once
 
 #include "Common.h"
@@ -13,7 +13,7 @@
 #include <mutex>
 #include <vector>
 
-namespace nexo {
+namespace senda {
 
 struct MonitorInfo {
     HMONITOR handle = nullptr;
@@ -54,4 +54,4 @@ private:
     std::mutex mutex_;
 };
 
-}  // namespace nexo
+}  // namespace senda

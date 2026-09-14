@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #include "AudioCapture.h"
 
 #include <audioclient.h>
@@ -8,7 +8,7 @@
 
 #include <vector>
 
-namespace nexo {
+namespace senda {
 
 AudioCapture::~AudioCapture() { Stop(); }
 
@@ -107,4 +107,4 @@ void AudioCapture::Loop() {
     CoUninitialize();
 }
 
-}  // namespace nexo
+}  // namespace senda

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #include "VideoEncoder.h"
 
 #include <codecapi.h>
@@ -10,7 +10,7 @@
 
 #include <algorithm>
 
-namespace nexo {
+namespace senda {
 namespace {
 
 constexpr size_t kSurfaces = 8;
@@ -599,4 +599,4 @@ void VideoEncoder::Deliver(IMFSample* sample) {
     buffer->Unlock();
 }
 
-}  // namespace nexo
+}  // namespace senda

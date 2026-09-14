@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (C) 2026 Senda Studio contributors
+
+package com.senda.studio.engine.studio
+
+import com.senda.studio.engine.model.Facing
+import com.senda.studio.engine.model.Source
+import com.senda.studio.engine.model.Transform
+
+/** Estudio inicial para que la app no arranque vacía: una escena de juego, una de cámara y una de pausa. */
+fun StudioController.seedDefaultStudio() {
+    if (state.value.scenes.isNotEmpty()) return
+
+    addScene("Juego")
+    addSource(Source.Screen(id = "screen", name = "Pantalla"))
+    addSource(
+        Source.Camera(id = "cam-front", name = "Cámara frontal", facing = Facing.Front),
+        Transform(x = 0.72f, y = 0.66f, width = 0.26f, height = 0.30f),
+    )
+    addSource(Source.Microphone(id = "mic", name = "Micrófono"))
+    addSource(Source.InternalAudio(id = "internal", name = "Audio del juego"))
+
+    val camera = addScene("Cámara").also { selectScene(it) }
+    addSource(Source.Camera(id = "cam-back", name = "Cámara trasera", facing = Facing.Back))
+    addSource(
+        Source.Text(id = "title", name = "Título", text = "En directo con Senda Studio", backgroundArgb = 0x99000000),
+        Transform(x = 0.04f, y = 0.84f, width = 0.5f, height = 0.1f),
+    )
+
+    addScene("Pausa").also { selectScene(it) }
+    addSource(Source.SolidColor(id = "bg", name = "Fondo", argb = 0xFF101218))
+    addSource(
+        Source.Text(id = "brb", name = "Mensaje", text = "Volvemos enseguida"),
+        Transform(x = 0.25f, y = 0.42f, width = 0.5f, height = 0.16f),
+    )
+
+    // Se arranca en la escena de cámara: funciona con solo aceptar permisos, sin captura de pantalla
+    selectScene(camera)
+    selectItem(null)
+}

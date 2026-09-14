@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: GPL-2.0-or-later -->
 <resources>
-    <color name="nexo_ink">#0B0C10</color>
-    <color name="nexo_volt">#C8F547</color>
+    <!-- Azul noche de la marca: fondo de la app y del icono -->
+    <color name="senda_night">#0D1117</color>
 
     <!-- El tema real lo pinta Compose; esto evita el destello blanco al arrancar -->
-    <style name="Theme.Nexo" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/nexo_ink</item>
+    <style name="Theme.Senda" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/senda_night</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>

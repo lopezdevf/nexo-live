@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 
 import java.util.Properties
 
@@ -9,24 +9,24 @@ plugins {
 }
 
 /**
- * Firma de publicación: fuera del repositorio, en ~/.nexolive/firma.properties (o la ruta de la
- * variable NEXO_SIGNING). Sin ese archivo, la versión release se genera sin firmar.
+ * Firma de publicación: fuera del repositorio, en ~/.sendastudio/firma.properties (o la ruta de la
+ * variable SENDA_SIGNING). Sin ese archivo, la versión release se genera sin firmar.
  */
 val signing = Properties().apply {
-    val file = System.getenv("NEXO_SIGNING")?.let(::File) ?: File(System.getProperty("user.home"), ".nexolive/firma.properties")
+    val file = System.getenv("SENDA_SIGNING")?.let(::File) ?: File(System.getProperty("user.home"), ".sendastudio/firma.properties")
     if (file.isFile) file.inputStream().use(::load)
 }
 
 android {
-    namespace = "com.nexo.live"
+    namespace = "com.senda.studio"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.nexo.live"
+        applicationId = "com.senda.studio"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
     }
 
     signingConfigs {

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 //
-// Nexo Live PC: ventana principal. Busca los móviles con Nexo Live en la red, y al conectar envía
+// Senda Studio PC: ventana principal. Busca los móviles con Senda Studio en la red, y al conectar envía
 // la pantalla y el sonido del PC a la fuente «PC» del móvil.
 
+#include "BrandMark.h"
 #include "Common.h"
 #include "Streamer.h"
 
@@ -23,8 +24,9 @@
 #include <algorithm>
 #include <memory>
 #include <thread>
+#include <vector>
 
-using namespace nexo;
+using namespace senda;
 
 namespace {
 
@@ -45,15 +47,16 @@ enum ControlId : int {
     IDC_CONNECT,
 };
 
-// Colores de la app de Android (NexoTheme)
-constexpr COLORREF kInk = RGB(0x0B, 0x0C, 0x10);
-constexpr COLORREF kPanel = RGB(0x13, 0x15, 0x1B);
-constexpr COLORREF kRaised = RGB(0x1B, 0x1E, 0x26);
-constexpr COLORREF kLine = RGB(0x28, 0x2C, 0x36);
-constexpr COLORREF kTextHigh = RGB(0xF4, 0xF5, 0xF7);
-constexpr COLORREF kTextMid = RGB(0x9A, 0xA0, 0xAE);
-constexpr COLORREF kTextLow = RGB(0x5E, 0x64, 0x72);
-constexpr COLORREF kVolt = RGB(0xC8, 0xF5, 0x47);
+// Colores de la app de Android (SendaTheme)
+constexpr COLORREF kInk = RGB(0x0D, 0x11, 0x17);         // Azul noche
+constexpr COLORREF kPanel = RGB(0x14, 0x1A, 0x23);
+constexpr COLORREF kRaised = RGB(0x1C, 0x24, 0x30);
+constexpr COLORREF kLine = RGB(0x2A, 0x34, 0x41);
+constexpr COLORREF kTextHigh = RGB(0xFF, 0xFF, 0xFF);
+constexpr COLORREF kTextMid = RGB(0x9B, 0xA7, 0xB8);
+constexpr COLORREF kTextLow = RGB(0x5F, 0x6B, 0x7C);
+constexpr COLORREF kAccent = RGB(0x00, 0x66, 0xFF);      // Azul eléctrico
+constexpr COLORREF kAccentGlow = RGB(0x00, 0xA3, 0xFF);  // Cian neón
 constexpr COLORREF kLive = RGB(0xFF, 0x4D, 0x5E);
 constexpr COLORREF kGood = RGB(0x4A, 0xDE, 0x80);
 
@@ -73,7 +76,7 @@ struct App {
     bool audioOn = true;
     bool cursorOn = true;
     Streamer streamer;
-    std::wstring status = L"Buscando móviles con Nexo Live en la red…";
+    std::wstring status = L"Buscando móviles con Senda Studio en la red…";
     COLORREF statusColor = kTextMid;
     std::wstring detail;
     bool autoConnect = false;
@@ -184,35 +187,35 @@ void ResizeWindow() {
 void LoadSettings() {
     wchar_t* folder = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &folder))) {
-        std::wstring dir = std::wstring(folder) + L"\\NexoLivePC";
+        std::wstring dir = std::wstring(folder) + L"\\SendaStudioPC";
         CreateDirectoryW(dir.c_str(), nullptr);
         app.settingsPath = dir + L"\\ajustes.ini";
     }
     CoTaskMemFree(folder);
     wchar_t buffer[256];
-    GetPrivateProfileStringW(L"Nexo", L"direccion", L"", buffer, ARRAYSIZE(buffer), app.settingsPath.c_str());
+    GetPrivateProfileStringW(L"Senda", L"direccion", L"", buffer, ARRAYSIZE(buffer), app.settingsPath.c_str());
     SetWindowTextW(app.address, buffer);
-    GetPrivateProfileStringW(L"Nexo", L"codigo", L"", buffer, ARRAYSIZE(buffer), app.settingsPath.c_str());
+    GetPrivateProfileStringW(L"Senda", L"codigo", L"", buffer, ARRAYSIZE(buffer), app.settingsPath.c_str());
     SetWindowTextW(app.code, buffer);
-    int quality = GetPrivateProfileIntW(L"Nexo", L"calidad", 0, app.settingsPath.c_str());
+    int quality = GetPrivateProfileIntW(L"Senda", L"calidad", 0, app.settingsPath.c_str());
     ComboBox_SetCurSel(app.quality, std::clamp(quality, 0, static_cast<int>(std::size(kQualities)) - 1));
-    int monitor = GetPrivateProfileIntW(L"Nexo", L"pantalla", 0, app.settingsPath.c_str());
+    int monitor = GetPrivateProfileIntW(L"Senda", L"pantalla", 0, app.settingsPath.c_str());
     ComboBox_SetCurSel(app.monitor, std::clamp(monitor, 0, std::max(0, static_cast<int>(app.monitors.size()) - 1)));
-    app.audioOn = GetPrivateProfileIntW(L"Nexo", L"audio", 1, app.settingsPath.c_str()) != 0;
-    app.cursorOn = GetPrivateProfileIntW(L"Nexo", L"cursor", 1, app.settingsPath.c_str()) != 0;
+    app.audioOn = GetPrivateProfileIntW(L"Senda", L"audio", 1, app.settingsPath.c_str()) != 0;
+    app.cursorOn = GetPrivateProfileIntW(L"Senda", L"cursor", 1, app.settingsPath.c_str()) != 0;
 }
 
 void SaveSettings() {
     if (app.settingsPath.empty()) return;
     wchar_t buffer[256];
     GetWindowTextW(app.address, buffer, ARRAYSIZE(buffer));
-    WritePrivateProfileStringW(L"Nexo", L"direccion", buffer, app.settingsPath.c_str());
+    WritePrivateProfileStringW(L"Senda", L"direccion", buffer, app.settingsPath.c_str());
     GetWindowTextW(app.code, buffer, ARRAYSIZE(buffer));
-    WritePrivateProfileStringW(L"Nexo", L"codigo", buffer, app.settingsPath.c_str());
-    WritePrivateProfileStringW(L"Nexo", L"calidad", std::to_wstring(ComboBox_GetCurSel(app.quality)).c_str(), app.settingsPath.c_str());
-    WritePrivateProfileStringW(L"Nexo", L"pantalla", std::to_wstring(ComboBox_GetCurSel(app.monitor)).c_str(), app.settingsPath.c_str());
-    WritePrivateProfileStringW(L"Nexo", L"audio", app.audioOn ? L"1" : L"0", app.settingsPath.c_str());
-    WritePrivateProfileStringW(L"Nexo", L"cursor", app.cursorOn ? L"1" : L"0", app.settingsPath.c_str());
+    WritePrivateProfileStringW(L"Senda", L"codigo", buffer, app.settingsPath.c_str());
+    WritePrivateProfileStringW(L"Senda", L"calidad", std::to_wstring(ComboBox_GetCurSel(app.quality)).c_str(), app.settingsPath.c_str());
+    WritePrivateProfileStringW(L"Senda", L"pantalla", std::to_wstring(ComboBox_GetCurSel(app.monitor)).c_str(), app.settingsPath.c_str());
+    WritePrivateProfileStringW(L"Senda", L"audio", app.audioOn ? L"1" : L"0", app.settingsPath.c_str());
+    WritePrivateProfileStringW(L"Senda", L"cursor", app.cursorOn ? L"1" : L"0", app.settingsPath.c_str());
 }
 
 // ---- Estado --------------------------------------------------------------------------------
@@ -239,7 +242,7 @@ void UpdateControls() {
 void OnStateChanged() {
     switch (app.streamer.State()) {
         case StreamState::Idle:
-            SetStatus(app.found.empty() ? L"Buscando móviles con Nexo Live en la red…" : L"Elige el móvil y pulsa Conectar.", kTextMid);
+            SetStatus(app.found.empty() ? L"Buscando móviles con Senda Studio en la red…" : L"Elige el móvil y pulsa Conectar.", kTextMid);
             break;
         case StreamState::Connecting:
             SetStatus(L"Conectando…", kTextMid);
@@ -376,23 +379,31 @@ void PaintWindow(HDC dc) {
     FillRect(dc, &client, app.brushInk);
     Layout l = ComputeLayout();
 
-    // Marca: tres nodos que forman una N, como el icono de la app
+    // Marca: el isotipo de Senda Studio, del cian neón al azul eléctrico como el icono de la app
     {
         Gdiplus::Graphics g(dc);
         g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-        const Gdiplus::REAL x0 = static_cast<Gdiplus::REAL>(S(kMargin)), y0 = static_cast<Gdiplus::REAL>(S(26));
-        const Gdiplus::REAL u = static_cast<Gdiplus::REAL>(S(28)) / 32.0f;
-        Gdiplus::Pen pen(G(kVolt), 3.5f * u);
-        pen.SetStartCap(Gdiplus::LineCapRound);
-        pen.SetEndCap(Gdiplus::LineCapRound);
-        pen.SetLineJoin(Gdiplus::LineJoinRound);
-        Gdiplus::PointF pts[] = {{x0, y0 + 32 * u}, {x0, y0}, {x0 + 32 * u, y0 + 32 * u}, {x0 + 32 * u, y0}};
-        g.DrawLines(&pen, pts, 4);
-        Gdiplus::SolidBrush white(G(kTextHigh)), red(G(kLive));
-        for (int i = 0; i < 3; i++) g.FillEllipse(&white, pts[i].X - 3.5f * u, pts[i].Y - 3.5f * u, 7 * u, 7 * u);
-        g.FillEllipse(&red, pts[3].X - 4.5f * u, pts[3].Y - 4.5f * u, 9 * u, 9 * u);
+        const Gdiplus::REAL height = static_cast<Gdiplus::REAL>(S(38));
+        const Gdiplus::REAL scale = height / brand::kMarkHeight;
+        const Gdiplus::REAL x0 = static_cast<Gdiplus::REAL>(S(kMargin)) + (static_cast<Gdiplus::REAL>(S(32)) - brand::kMarkWidth * scale) / 2;
+        const Gdiplus::REAL y0 = static_cast<Gdiplus::REAL>(S(22));
+        Gdiplus::GraphicsPath path(Gdiplus::FillModeAlternate);
+        const brand::MarkPoint* point = brand::kMarkPoints;
+        for (int size : brand::kMarkLoopSizes) {
+            std::vector<Gdiplus::PointF> pts;
+            pts.reserve(size);
+            for (int i = 0; i < size; i++, point++) pts.push_back({x0 + point->x * scale, y0 + point->y * scale});
+            path.StartFigure();
+            path.AddBeziers(pts.data(), size);
+            path.CloseFigure();
+        }
+        Gdiplus::LinearGradientBrush brush(Gdiplus::PointF(x0 + brand::kMarkWidth * scale, y0), Gdiplus::PointF(x0, y0 + height), G(kAccentGlow), G(kAccent));
+        const Gdiplus::REAL positions[] = {0.0f, 0.55f, 1.0f};
+        const Gdiplus::Color colors[] = {G(kAccentGlow), G(kAccent), G(kAccent)};
+        brush.SetInterpolationColors(colors, positions, 3);
+        g.FillPath(&brush, &path);
     }
-    DrawText(dc, L"Nexo Live PC", R(kMargin + 44, 18, 300, 32), app.fontTitle, kTextHigh, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+    DrawText(dc, L"Senda Studio PC", R(kMargin + 44, 18, 300, 32), app.fontTitle, kTextHigh, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
     DrawText(dc, L"Envía la pantalla y el sonido de este PC a tu móvil.", R(kMargin + 44, 50, 340, 22), app.fontSmall, kTextMid,
              DT_LEFT | DT_SINGLELINE);
 
@@ -405,7 +416,7 @@ void PaintWindow(HDC dc) {
         InflateRect(&text, -S(16), -S(14));
         DrawText(dc,
                  app.searching ? L"Buscando…"
-                               : L"No aparece ningún móvil.\nEn Nexo Live añade la fuente «PC» y conecta el móvil a la misma WiFi que este PC "
+                               : L"No aparece ningún móvil.\nEn Senda Studio añade la fuente «PC» y conecta el móvil a la misma WiFi que este PC "
                                  L"(o escribe su dirección abajo).",
                  text, app.fontSmall, kTextMid);
     }
@@ -435,10 +446,10 @@ void DrawToggle(const DRAWITEMSTRUCT* item, bool on, const wchar_t* label) {
     int h = S(20), w = S(36);
     int top = r.top + (r.bottom - r.top - h) / 2;
     RECT track{r.left, top, r.left + w, top + h};
-    RoundRect(g, track, h / 2, on ? (enabled ? kVolt : kTextLow) : kLine);
+    RoundRect(g, track, h / 2, on ? (enabled ? kAccent : kTextLow) : kLine);
     int knob = h - S(6);
     int knobX = on ? track.right - S(3) - knob : track.left + S(3);
-    Gdiplus::SolidBrush brush(G(on ? kInk : kTextMid));
+    Gdiplus::SolidBrush brush(G(on ? kTextHigh : kTextMid));
     g.FillEllipse(&brush, knobX, top + S(3), knob, knob);
     RECT text = r;
     text.left += w + S(12);
@@ -456,11 +467,11 @@ void DrawButton(const DRAWITEMSTRUCT* item) {
     if (item->CtlID == IDC_CONNECT) {
         auto state = app.streamer.State();
         bool busy = Busy();
-        COLORREF fill = busy ? (state == StreamState::Streaming ? kLive : kRaised) : kVolt;
+        COLORREF fill = busy ? (state == StreamState::Streaming ? kLive : kRaised) : kAccent;
         if (pressed) fill = RGB(GetRValue(fill) * 85 / 100, GetGValue(fill) * 85 / 100, GetBValue(fill) * 85 / 100);
         RoundRect(g, r, S(10), fill, busy && state != StreamState::Streaming ? kLine : CLR_INVALID);
         const wchar_t* label = state == StreamState::Streaming ? L"Desconectar" : busy ? L"Cancelar" : L"Conectar";
-        DrawText(dc, label, r, app.fontButton, busy ? kTextHigh : kInk, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawText(dc, label, r, app.fontButton, kTextHigh, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     } else {
         RoundRect(g, r, S(8), pressed ? kLine : kRaised, kLine);
         DrawText(dc, L"Buscar de nuevo", r, app.fontBody, enabled ? kTextHigh : kTextLow, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -478,9 +489,9 @@ void DrawPhone(const DRAWITEMSTRUCT* item) {
     DeleteObject(panel);
     if (selected) {
         RECT bar{r.left, r.top, r.left + S(4), r.bottom};
-        HBRUSH volt = CreateSolidBrush(kVolt);
-        FillRect(dc, &bar, volt);
-        DeleteObject(volt);
+        HBRUSH accent = CreateSolidBrush(kAccent);
+        FillRect(dc, &bar, accent);
+        DeleteObject(accent);
     }
     RECT name{r.left + S(16), r.top + S(5), r.right - S(10), r.top + S(26)};
     DrawText(dc, phone.device, name, app.fontBody, kTextHigh, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -671,18 +682,18 @@ void ParseCommandLine() {
         auto next = [&]() -> std::wstring { return i + 1 < argc ? argv[++i] : L""; };
         if (arg == L"--connect") {
             std::wstring address = next();
-            WritePrivateProfileStringW(L"Nexo", L"direccion", address.c_str(), app.settingsPath.c_str());
+            WritePrivateProfileStringW(L"Senda", L"direccion", address.c_str(), app.settingsPath.c_str());
             app.autoConnect = true;
         } else if (arg == L"--code") {
-            WritePrivateProfileStringW(L"Nexo", L"codigo", next().c_str(), app.settingsPath.c_str());
+            WritePrivateProfileStringW(L"Senda", L"codigo", next().c_str(), app.settingsPath.c_str());
         } else if (arg == L"--quality") {
-            WritePrivateProfileStringW(L"Nexo", L"calidad", next().c_str(), app.settingsPath.c_str());
+            WritePrivateProfileStringW(L"Senda", L"calidad", next().c_str(), app.settingsPath.c_str());
         } else if (arg == L"--monitor") {
-            WritePrivateProfileStringW(L"Nexo", L"pantalla", next().c_str(), app.settingsPath.c_str());
+            WritePrivateProfileStringW(L"Senda", L"pantalla", next().c_str(), app.settingsPath.c_str());
         } else if (arg == L"--software") {
             app.forceSoftware = true;
         } else if (arg == L"--no-audio") {
-            WritePrivateProfileStringW(L"Nexo", L"audio", L"0", app.settingsPath.c_str());
+            WritePrivateProfileStringW(L"Senda", L"audio", L"0", app.settingsPath.c_str());
         }
     }
     LocalFree(argv);
@@ -706,13 +717,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
 
     wchar_t* folder = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &folder))) {
-        std::wstring dir = std::wstring(folder) + L"\\NexoLivePC";
+        std::wstring dir = std::wstring(folder) + L"\\SendaStudioPC";
         CreateDirectoryW(dir.c_str(), nullptr);
         app.settingsPath = dir + L"\\ajustes.ini";
     }
     CoTaskMemFree(folder);
     ParseCommandLine();
-    Log(L"Nexo Live PC iniciado");
+    Log(L"Senda Studio PC iniciado");
 
     WNDCLASSEXW wc{sizeof(wc)};
     wc.lpfnWndProc = WindowProc;
@@ -720,10 +731,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
     wc.hIconSm = LoadIconW(instance, MAKEINTRESOURCEW(1));
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.lpszClassName = L"NexoLivePC";
+    wc.lpszClassName = L"SendaStudioPC";
     RegisterClassExW(&wc);
 
-    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Nexo Live PC", WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX), CW_USEDEFAULT, CW_USEDEFAULT,
+    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"Senda Studio PC", WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX), CW_USEDEFAULT, CW_USEDEFAULT,
                                 480, 780, nullptr, nullptr, instance, nullptr);
     // Abierta desde otro programa sin ventana, Windows puede pedir SW_HIDE: se muestra igualmente
     ShowWindow(hwnd, show == SW_HIDE || show == SW_SHOWMINNOACTIVE ? SW_SHOWNORMAL : show);

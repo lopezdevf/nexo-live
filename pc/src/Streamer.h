@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #pragma once
 
 #include "AudioCapture.h"
@@ -12,7 +12,7 @@
 #include <mutex>
 #include <thread>
 
-namespace nexo {
+namespace senda {
 
 struct Quality {
     const wchar_t* label;
@@ -91,4 +91,4 @@ private:
     AudioCapture audio_;
 };
 
-}  // namespace nexo
+}  // namespace senda

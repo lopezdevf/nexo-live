@@ -1,6 +1,6 @@
-# Nexo Live — Arquitectura
+# Senda Studio — Arquitectura
 
-Estudio de emisión móvil al estilo OBS: escenas compuestas por fuentes, mezclador de audio,
+Estudio de emisión móvil: escenas compuestas por fuentes, mezclador de audio,
 emisión RTMP/SRT y grabación local. Android primero, en Kotlin.
 
 ## Módulos
@@ -8,7 +8,7 @@ emisión RTMP/SRT y grabación local. Android primero, en Kotlin.
 | Módulo    | Contenido |
 |-----------|-----------|
 | `:engine` | Modelo, `StudioEngine`, compositor GL, capturas, audio, codificadores, destinos, grabación, térmica y servicio en primer plano. Sin Compose. |
-| `:app`    | UI en Jetpack Compose (mesa de control, propiedades, ajustes), tema Nexo, ViewModels. |
+| `:app`    | UI en Jetpack Compose (mesa de control, propiedades, ajustes), tema Senda, ViewModels. |
 
 Paquetes de `:engine`: `model`, `studio` (estado y guardado), `render` + `gl` (compositor), `capture`
 (Camera2, UVC, pantalla), `audio`, `encode`, `output` (destinos, multistream, MP4), `devices`, `thermal`,
@@ -68,9 +68,9 @@ en pantalla cambia lo que sale al aire sin capas intermedias.
 - **Reloj de audio propio**: el mezclador saca un bloque AAC (1024 muestras) exactamente cada 21,3 ms
   y cada fuente llena su búfer circular; si una fuente se retrasa suena silencio en vez de desincronizar.
 
-## Enlace con el PC (Nexo Link)
+## Enlace con el PC (Senda Link)
 
-La fuente «PC» recibe la pantalla y el sonido de **Nexo Live PC** (`pc/`, C++ con el SDK de Windows) por
+La fuente «PC» recibe la pantalla y el sonido de **Senda Studio PC** (`pc/`, C++ con el SDK de Windows) por
 un protocolo propio sobre TCP, pensado para el menor retraso:
 
 ```mermaid
@@ -78,13 +78,13 @@ flowchart LR
     WGC[Windows.Graphics.Capture] --> VP[Conversión BGRA→NV12 en la GPU]
     VP --> MFT[H.264 por hardware<br/>Media Foundation, baja latencia]
     WASAPI[WASAPI loopback<br/>48 kHz estéreo] --> TCP
-    MFT --> TCP[Nexo Link por TCP]
+    MFT --> TCP[Senda Link por TCP]
     TCP --> DEC[MediaCodec<br/>sin búfer de espera]
     DEC --> COMP[Textura del compositor]
     TCP --> MIX[Canal del mezclador]
 ```
 
-- **Descubrimiento**: el PC envía `NXL1?` por difusión UDP (puerto 9750) y cada fuente PC activa responde
+- **Descubrimiento**: el PC envía `SNL1?` por difusión UDP (puerto 9750) y cada fuente PC activa responde
   con su puerto y el nombre del móvil. `PcLinkDiscovery` pide un `MulticastLock` mientras escucha.
 - **Emparejamiento**: cada fuente tiene un código de 4 cifras; sin él el móvil rechaza la conexión.
 - **Retraso**: codificador en modo de baja latencia sin fotogramas B; el PC descarta vídeo atrasado y pide
@@ -135,7 +135,7 @@ flowchart LR
 
 - **`PlatformCatalog`**: 15 destinos (Twitch, YouTube, Kick, TikTok, Facebook, Instagram, X, Trovo,
   Restream, LinkedIn, Rumble, Steam, Vimeo, RTMP y SRT personalizados). Servidores y límites de bitrate
-  contrastados con la lista de servicios de OBS y la API de ingest de Twitch.
+  según los datos públicos de ingest de cada plataforma y la API de ingest de Twitch.
 - **`ConnectionLink`**: RootEncoder toma los dos primeros segmentos de la ruta como «app», así que la
   clave va siempre al final y el servidor no admite «?». Los servidores de Amazon IVS (Twitch, Kick)
   se normalizan a `/app`.
@@ -164,5 +164,5 @@ añadido posterior. Exige registrar una app de desarrollador en cada plataforma 
 5. **Audio y dispositivos** ✅ — captura por dispositivo, audio interno, mezclador, vúmetros y monitorización.
 6. **Térmica, ajustes y guardado** ✅ — protección térmica real, ajustes completos y escenas persistentes.
 7. **Validación en dispositivos** — probado en un Galaxy S25 Ultra (cámaras, grabación, Twitch 1080p60, fuente PC con
-   Nexo Live PC por WiFi); faltan más fabricantes, cámaras UVC y capturadoras.
+   Senda Studio PC por WiFi); faltan más fabricantes, cámaras UVC y capturadoras.
 8. **Extras** — inicio de sesión OAuth por plataforma, chroma key/LUT, overlay de chat y alertas.

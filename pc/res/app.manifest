@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!-- SPDX-License-Identifier: GPL-2.0-or-later -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
-  <assemblyIdentity type="win32" name="NexoLive.PC" version="0.2.0.0" processorArchitecture="*" />
-  <description>Nexo Live PC</description>
+  <assemblyIdentity type="win32" name="SendaStudio.PC" version="0.3.0.0" processorArchitecture="*" />
+  <description>Senda Studio PC</description>
   <dependency>
     <dependentAssembly>
       <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0"

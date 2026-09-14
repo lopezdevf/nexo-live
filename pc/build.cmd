@@ -1,7 +1,7 @@
 @echo off
 rem SPDX-License-Identifier: GPL-2.0-or-later
-rem Compila Nexo Live PC con Visual Studio o Build Tools (C++ y SDK de Windows 10/11).
-rem Resultado: pc\build\NexoLivePC.exe
+rem Compila Senda Studio PC con Visual Studio o Build Tools (C++ y SDK de Windows 10/11).
+rem Resultado: pc\build\SendaStudioPC.exe
 
 setlocal
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -14,7 +14,7 @@ cd /d "%~dp0"
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release || exit /b 1
 cmake --build build || exit /b 1
 echo.
-echo Listo: %~dp0build\NexoLivePC.exe
+echo Listo: %~dp0build\SendaStudioPC.exe
 exit /b 0
 
 :novs

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #pragma once
 
 #include "Common.h"
@@ -14,9 +14,9 @@
 #include <thread>
 #include <vector>
 
-namespace nexo {
+namespace senda {
 
-/** Móvil con Nexo Live que respondió a la búsqueda en la red local. */
+/** Móvil con Senda Studio que respondió a la búsqueda en la red local. */
 struct PhoneInfo {
     std::string ip;
     uint16_t port = 0;
@@ -24,13 +24,13 @@ struct PhoneInfo {
     std::wstring source;
 };
 
-/** Envía «NXL1?» por difusión y recoge las respuestas durante [timeoutMs]. */
+/** Envía «SNL1?» por difusión y recoge las respuestas durante [timeoutMs]. */
 std::vector<PhoneInfo> DiscoverPhones(int timeoutMs);
 
-enum class ConnectResult { Ok, WrongCode, Unreachable, NotNexo };
+enum class ConnectResult { Ok, WrongCode, Unreachable, NotSenda };
 
 /**
- * Conexión Nexo Link con el móvil (ver engine/.../pclink/NexoLink.kt). Un hilo escribe en orden
+ * Conexión Senda Link con el móvil (ver engine/.../pclink/SendaLink.kt). Un hilo escribe en orden
  * lo que llega a la cola y otro lee las peticiones del móvil.
  *
  * Para el menor retraso, si la red no da abasto no se acumula vídeo: los fotogramas atrasados se
@@ -93,4 +93,4 @@ private:
     int64_t windowStartUs_ = 0;
 };
 
-}  // namespace nexo
+}  // namespace senda

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #pragma once
 
 #include "Common.h"
@@ -17,7 +17,7 @@
 #include <thread>
 #include <vector>
 
-namespace nexo {
+namespace senda {
 
 /**
  * Convierte la captura BGRA a NV12 en la GPU (escalando si hace falta) y la codifica en H.264 con
@@ -113,4 +113,4 @@ private:
     std::thread eventThread_;
 };
 
-}  // namespace nexo
+}  // namespace senda

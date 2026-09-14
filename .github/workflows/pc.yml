@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-name: Nexo Live PC
+name: Senda Studio PC
 
 on:
   push:
@@ -30,12 +30,12 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: NexoLivePC
-          path: pc/build/NexoLivePC.exe
+          name: SendaStudioPC
+          path: pc/build/SendaStudioPC.exe
           retention-days: 30
 
   # Al publicar una etiqueta vX.Y.Z, el .exe se adjunta a la versión de GitHub: el botón
-  # «Descargar Nexo Live PC» de la app apunta a la última versión publicada
+  # «Descargar Senda Studio PC» de la app apunta a la última versión publicada
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: NexoLivePC
+          name: SendaStudioPC
 
       - name: Adjuntar a la versión
         env:
@@ -53,7 +53,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Nexo Live $TAG" --generate-notes
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Senda Studio $TAG" --generate-notes
           # Si ya se subió a mano (con su suma SHA-256 en las notas), no se reemplaza
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx NexoLivePC.exe \
-            || gh release upload "$TAG" NexoLivePC.exe --repo "$GITHUB_REPOSITORY"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx SendaStudioPC.exe \
+            || gh release upload "$TAG" SendaStudioPC.exe --repo "$GITHUB_REPOSITORY"

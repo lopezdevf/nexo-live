@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #include "Link.h"
 
 #include <iphlpapi.h>
@@ -9,7 +9,7 @@
 #include <chrono>
 #include <set>
 
-namespace nexo {
+namespace senda {
 namespace {
 
 constexpr uint16_t kDiscoveryPort = 9750;
@@ -91,7 +91,7 @@ std::vector<PhoneInfo> DiscoverPhones(int timeoutMs) {
     local.sin_family = AF_INET;
     bind(s, reinterpret_cast<sockaddr*>(&local), sizeof(local));
 
-    static const char query[] = {'N', 'X', 'L', '1', '?'};
+    static const char query[] = {'S', 'N', 'L', '1', '?'};
     std::vector<in_addr> targets = BroadcastAddresses();
     in_addr everyone{};
     everyone.s_addr = INADDR_BROADCAST;
@@ -118,7 +118,7 @@ std::vector<PhoneInfo> DiscoverPhones(int timeoutMs) {
         sockaddr_in from{};
         int fromLen = sizeof(from);
         int n = recvfrom(s, buffer, sizeof(buffer), 0, reinterpret_cast<sockaddr*>(&from), &fromLen);
-        if (n < 5 + 2 + 2 || memcmp(buffer, "NXL1!", 5) != 0) continue;
+        if (n < 5 + 2 + 2 || memcmp(buffer, "SNL1!", 5) != 0) continue;
         auto p = reinterpret_cast<const uint8_t*>(buffer);
         PhoneInfo phone;
         phone.port = GetU16(p + 5);
@@ -184,7 +184,7 @@ ConnectResult LinkSession::Connect(const std::string& ip, uint16_t port, uint16_
     socket_ = s;
 
     std::string name = ToUtf8(pcName).substr(0, 256);
-    std::vector<uint8_t> hello = {'N', 'X', 'L', '1'};
+    std::vector<uint8_t> hello = {'S', 'N', 'L', '1'};
     PutU16(hello, code);
     PutU16(hello, static_cast<uint32_t>(name.size()));
     hello.insert(hello.end(), name.begin(), name.end());
@@ -192,18 +192,18 @@ ConnectResult LinkSession::Connect(const std::string& ip, uint16_t port, uint16_
     if (!SendAll(hello.data(), hello.size()) || !RecvAll(reply, sizeof(reply))) {
         closesocket(socket_);
         socket_ = INVALID_SOCKET;
-        return ConnectResult::NotNexo;
+        return ConnectResult::NotSenda;
     }
-    if (memcmp(reply, "NXL1", 4) != 0) {
+    if (memcmp(reply, "SNL1", 4) != 0) {
         closesocket(socket_);
         socket_ = INVALID_SOCKET;
-        return ConnectResult::NotNexo;
+        return ConnectResult::NotSenda;
     }
     std::string device(GetU16(reply + 5), '\0');
     if (!device.empty() && !RecvAll(reinterpret_cast<uint8_t*>(device.data()), device.size())) {
         closesocket(socket_);
         socket_ = INVALID_SOCKET;
-        return ConnectResult::NotNexo;
+        return ConnectResult::NotSenda;
     }
     deviceName = FromUtf8(device);
     if (reply[4] != 0) {
@@ -410,4 +410,4 @@ void LinkSession::Fail() {
     if (wasConnected && onDisconnected) onDisconnected();
 }
 
-}  // namespace nexo
+}  // namespace senda

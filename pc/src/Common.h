@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #pragma once
 
 #include <unknwn.h>
@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <string>
 
-namespace nexo {
+namespace senda {
 
 /** Microsegundos del reloj de alto rendimiento: la misma base que usa Windows.Graphics.Capture. */
 inline int64_t NowUs() {
@@ -27,7 +27,7 @@ inline int64_t NowUs() {
 std::string ToUtf8(const std::wstring& text);
 std::wstring FromUtf8(const std::string& text);
 
-/** Registro de diagnóstico en %LOCALAPPDATA%\NexoLivePC\registro.txt y en el depurador. */
+/** Registro de diagnóstico en %LOCALAPPDATA%\SendaStudioPC\registro.txt y en el depurador. */
 void Log(const wchar_t* format, ...);
 
-}  // namespace nexo
+}  // namespace senda

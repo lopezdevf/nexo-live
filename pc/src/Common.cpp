@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #include "Common.h"
 
 #include <shlobj.h>
@@ -9,7 +9,7 @@
 #include <cstdio>
 #include <mutex>
 
-namespace nexo {
+namespace senda {
 
 std::string ToUtf8(const std::wstring& text) {
     if (text.empty()) return {};
@@ -46,7 +46,7 @@ void Log(const wchar_t* format, ...) {
         FILE* f = nullptr;
         wchar_t* folder = nullptr;
         if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &folder))) {
-            std::wstring dir = std::wstring(folder) + L"\\NexoLivePC";
+            std::wstring dir = std::wstring(folder) + L"\\SendaStudioPC";
             CreateDirectoryW(dir.c_str(), nullptr);
             // Compartido: se puede leer mientras la app está abierta
             f = _wfsopen((dir + L"\\registro.txt").c_str(), L"w, ccs=UTF-8", _SH_DENYNO);
@@ -60,4 +60,4 @@ void Log(const wchar_t* format, ...) {
     }
 }
 
-}  // namespace nexo
+}  // namespace senda

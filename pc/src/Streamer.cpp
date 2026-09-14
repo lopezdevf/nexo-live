@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Copyright (C) 2026 Nexo Live contributors
+// Copyright (C) 2026 Senda Studio contributors
 #include "Streamer.h"
 
 #include <winrt/Windows.Foundation.h>
 
 #include <algorithm>
 
-namespace nexo {
+namespace senda {
 namespace {
 
 std::wstring ComputerName() {
@@ -135,8 +135,8 @@ void Streamer::Run(StreamSettings settings) {
             finalError = true;
             break;
         }
-        std::wstring retryMessage = result == ConnectResult::Unreachable ? L"No se encuentra el móvil. ¿Está Nexo Live abierto con la fuente PC?"
-                                    : result == ConnectResult::NotNexo  ? L"En esa dirección no responde Nexo Live."
+        std::wstring retryMessage = result == ConnectResult::Unreachable ? L"No se encuentra el móvil. ¿Está Senda Studio abierto con la fuente PC?"
+                                    : result == ConnectResult::NotSenda  ? L"En esa dirección no responde Senda Studio."
                                                                         : L"Se perdió la conexión con el móvil. Reintentando…";
         if (result == ConnectResult::Ok) {
             bool started = StartPipeline(settings);
@@ -226,4 +226,4 @@ void Streamer::StopPipeline() {
     SetThreadExecutionState(ES_CONTINUOUS);
 }
 
-}  // namespace nexo
+}  // namespace senda
