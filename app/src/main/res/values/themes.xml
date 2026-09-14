@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<resources>
+    <!-- Azul noche de la marca: fondo de la app y del icono -->
+    <color name="sirga_night">#0D1117</color>
+
+    <!-- El tema real lo pinta Compose; esto evita el destello blanco al arrancar -->
+    <style name="Theme.Sirga" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/sirga_night</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

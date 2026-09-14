@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+.kotlin/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+*/build/
+/captures
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.keystore
+*.jks
+# Mapa local de graphify: contiene rutas de tu equipo
+graphify-out/

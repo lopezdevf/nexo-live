@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+name: Sirga Studio PC
+
+on:
+  push:
+    branches: [main]
+    paths: ['pc/**', '.github/workflows/pc.yml']
+    tags: ['v*']
+  pull_request:
+    paths: ['pc/**', '.github/workflows/pc.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compilar
+        shell: cmd
+        run: pc\build.cmd
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SirgaStudioPC
+          path: pc/build/SirgaStudioPC.exe
+          retention-days: 30
+
+  # Al publicar una etiqueta vX.Y.Z, el .exe se adjunta a la versión de GitHub: el botón
+  # «Descargar Sirga Studio PC» de la app apunta a la última versión publicada
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: SirgaStudioPC
+
+      - name: Adjuntar a la versión
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Sirga Studio $TAG" --generate-notes
+          # Si ya se subió a mano (con su suma SHA-256 en las notas), no se reemplaza
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx SirgaStudioPC.exe \
+            || gh release upload "$TAG" SirgaStudioPC.exe --repo "$GITHUB_REPOSITORY"
