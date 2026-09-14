@@ -20,8 +20,8 @@ import time
 
 MAGIC = b"NXL1"
 DISCOVERY_PORT = 9750
-VIDEO_FORMAT, VIDEO_FRAME, AUDIO_PCM, TIME_REPLY = 0x01, 0x02, 0x03, 0x05
-KEYFRAME_REQUEST, TIME_REQUEST = 0x81, 0x82
+VIDEO_FORMAT, VIDEO_FRAME, AUDIO_PCM, TIME_REPLY, LATENCY_REPORT = 0x01, 0x02, 0x03, 0x05, 0x07
+KEYFRAME_REQUEST, TIME_REQUEST, FRAME_SHOWN = 0x81, 0x82, 0x83
 
 
 def now_us():
@@ -148,7 +148,9 @@ class Sender:
         self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         self.lock = threading.Lock()
         self.keyframe_wanted = threading.Event()
-        self.rtt_ms = None
+        self.latencies = []  # ms: captura → mostrado en el móvil → aviso de vuelta
+        self.sent_bytes = 0
+        self.send_wait = 0.0  # segundos bloqueado enviando: la red no da abasto
         name_bytes = name.encode()
         self.sock.sendall(MAGIC + struct.pack(">HH", code, len(name_bytes)) + name_bytes)
         reply = self._recv(5)
@@ -180,12 +182,19 @@ class Sender:
                     self.send(TIME_REPLY, payload[:8] + struct.pack(">Q", now_us()))
                 elif kind == KEYFRAME_REQUEST:
                     self.keyframe_wanted.set()
+                elif kind == FRAME_SHOWN and length >= 8:
+                    capture = struct.unpack(">Q", payload[:8])[0]
+                    self.latencies.append((now_us() - capture) / 1000)
         except (ConnectionError, OSError):
             print("El móvil cerró la conexión")
 
     def send(self, kind, payload):
+        data = struct.pack(">BI", kind, len(payload)) + payload
         with self.lock:
-            self.sock.sendall(struct.pack(">BI", kind, len(payload)) + payload)
+            start = time.perf_counter()
+            self.sock.sendall(data)
+            self.send_wait += time.perf_counter() - start
+            self.sent_bytes += len(data)
 
 
 def main():
@@ -196,6 +205,7 @@ def main():
     parser.add_argument("--video", help="MP4 con vídeo H.264")
     parser.add_argument("--seconds", type=float, default=30)
     parser.add_argument("--discover", action="store_true")
+    parser.add_argument("--no-audio", action="store_true", help="no envía el tono de audio")
     args = parser.parse_args()
 
     if args.discover or not args.host:
@@ -223,11 +233,26 @@ def main():
             sent += chunk
             time.sleep(max(0.0, start + sent / rate - time.perf_counter()))
 
-    threading.Thread(target=audio, daemon=True).start()
+    if not args.no_audio:
+        threading.Thread(target=audio, daemon=True).start()
 
     interval, index, start = 1.0 / fps, keyframes[0], time.perf_counter()
     sent_frames = 0
+    last_report, report_frames = start, 0
     while time.perf_counter() - start < args.seconds:
+        now = time.perf_counter()
+        if now - last_report >= 5:
+            lat = sorted(sender.latencies)
+            sender.latencies.clear()
+            if lat:
+                sender.send(LATENCY_REPORT, struct.pack(">I", int(sum(lat) / len(lat))))
+            window = now - last_report
+            print("%5.0fs  %4.1f fps  %5.1f Mbps  bloqueo %3.0f%%  retraso %s" % (
+                now - start, (sent_frames - report_frames) / window, sender.sent_bytes * 8 / window / 1e6,
+                100 * sender.send_wait / window,
+                "media %.0f ms, mín %.0f, p90 %.0f, máx %.0f (%d)" % (sum(lat) / len(lat), lat[0], lat[int(len(lat) * 0.9)], lat[-1], len(lat)) if lat else "sin datos"),
+                flush=True)
+            sender.sent_bytes, sender.send_wait, report_frames, last_report = 0, 0.0, sent_frames, now
         if sender.keyframe_wanted.is_set():
             sender.keyframe_wanted.clear()
             index = next((k for k in keyframes if k >= index), keyframes[0])

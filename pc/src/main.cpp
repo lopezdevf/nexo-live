@@ -535,6 +535,8 @@ void OnStatsTimer() {
     _snwprintf_s(detail, _TRUNCATE, L"%u fps · %.1f Mbps%s\n%s", frames, bytes * 8 / 1'000'000.0, latencyText.c_str(),
                  app.streamer.EncoderName().c_str());
     SetStatus(app.status, kGood, detail);
+    static int ticks = 0;
+    if (++ticks % 5 == 0) Log(L"Estadísticas: %u fps, %.1f Mbps enviados, bitrate %u kbps, retraso %d ms", frames, bytes * 8 / 1'000'000.0, bitrate, latency);
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
