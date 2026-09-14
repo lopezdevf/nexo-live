@@ -67,10 +67,30 @@ std::wstring Streamer::LastError() {
     return error_;
 }
 
-void Streamer::TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs) {
+void Streamer::TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs, uint32_t& bitrateKbps) {
     frames = encoder_.TakeEncodedFrames();
     bytes = link_.TakeSentBytes();
     latencyMs = link_.LatencyMs();
+    bitrateKbps = encoder_.BitrateKbps();
+}
+
+/**
+ * Una vez por segundo: si la red se atascó o el retraso sube, baja un 30 % (mínimo 2 Mbps); tras
+ * 8 segundos estables sube un 15 % hasta la calidad elegida. En WiFi floja se ve algo menos nítido
+ * pero sin tirones ni retraso acumulado.
+ */
+void Streamer::AdaptBitrate() {
+    uint32_t current = encoder_.BitrateKbps();
+    if (current == 0 || targetKbps_ == 0) return;
+    uint32_t congestion = link_.TakeCongestionEvents();
+    int latency = link_.LatencyMs();
+    if (congestion > 0 || latency > 120) {
+        stableSeconds_ = 0;
+        encoder_.SetBitrate(std::max<uint32_t>(2000, current * 7 / 10));
+    } else if (++stableSeconds_ >= 8 && current < targetKbps_) {
+        stableSeconds_ = 0;
+        encoder_.SetBitrate(std::min<uint32_t>(targetKbps_, current * 115 / 100));
+    }
 }
 
 void Streamer::SetState(StreamState state, const std::wstring& error) {
@@ -123,7 +143,11 @@ void Streamer::Run(StreamSettings settings) {
             if (started) {
                 SetState(StreamState::Streaming);
                 std::unique_lock lock(mutex_);
-                wake_.wait(lock, [this] { return stopRequested_ || disconnected_; });
+                while (!wake_.wait_for(lock, std::chrono::seconds(1), [this] { return stopRequested_ || disconnected_; })) {
+                    lock.unlock();
+                    AdaptBitrate();
+                    lock.lock();
+                }
             }
             StopPipeline();
             if (!started) {
@@ -159,6 +183,8 @@ bool Streamer::StartPipeline(const StreamSettings& settings) {
         config.fps = quality.fps;
         config.bitrateKbps = quality.bitrateKbps;
         config.forceSoftware = settings.forceSoftware;
+        targetKbps_ = quality.bitrateKbps;
+        stableSeconds_ = 0;
 
         if (!encoder_.Start(device.get(), config, [this](const uint8_t* data, size_t size, bool keyframe, int64_t captureUs) {
                 link_.SendVideoFrame(data, size, keyframe, captureUs);

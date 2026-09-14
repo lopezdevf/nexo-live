@@ -13,6 +13,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -35,6 +36,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nexo.live.engine.model.LiveStatus
@@ -133,47 +136,55 @@ fun TransportBar(
     modifier: Modifier = Modifier,
 ) {
     val c = Nexo.colors
-    Row(
-        modifier.fillMaxWidth().padding(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TransportButton(
-            label = "Estudio",
-            icon = { Icon(Icons.Outlined.ViewColumn, null, tint = if (state.studioMode) c.onVolt else c.textMid, modifier = Modifier.size(18.dp)) },
-            background = if (state.studioMode) c.volt else Color.Transparent,
-            content = if (state.studioMode) c.onVolt else c.textMid,
-            onClick = { onStudioMode(!state.studioMode) },
-        )
-        if (state.studioMode) {
+    // En ventanas estrechas (pantalla partida, ventana emergente) los botones secundarios se quedan en icono
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val compact = maxWidth < 480.dp
+        Row(
+            Modifier.fillMaxWidth().padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             TransportButton(
-                label = "Transición",
-                icon = { Icon(Icons.Outlined.SwapHoriz, null, tint = c.textHigh, modifier = Modifier.size(18.dp)) },
-                background = c.raised,
+                label = "Estudio",
+                icon = { Icon(Icons.Outlined.ViewColumn, null, tint = if (state.studioMode) c.onVolt else c.textMid, modifier = Modifier.size(18.dp)) },
+                background = if (state.studioMode) c.volt else Color.Transparent,
+                content = if (state.studioMode) c.onVolt else c.textMid,
+                onClick = { onStudioMode(!state.studioMode) },
+                iconOnly = compact,
+            )
+            if (state.studioMode) {
+                TransportButton(
+                    label = "Transición",
+                    icon = { Icon(Icons.Outlined.SwapHoriz, null, tint = c.textHigh, modifier = Modifier.size(18.dp)) },
+                    background = c.raised,
+                    content = c.textHigh,
+                    onClick = onTransition,
+                    iconOnly = compact,
+                )
+            }
+            Box(Modifier.weight(1f))
+            TransportButton(
+                label = if (state.isRecording) "Detener" else "Grabar",
+                icon = { Box(Modifier.size(10.dp).background(c.record, if (state.isRecording) RoundedCornerShape(2.dp) else CircleShape)) },
+                background = Color.Transparent,
                 content = c.textHigh,
-                onClick = onTransition,
+                onClick = onRecord,
+                compact = compact,
+            )
+            TransportButton(
+                label = when {
+                    state.isLive -> "Terminar"
+                    destinationCount > 1 -> "Emitir · $destinationCount"
+                    else -> "Emitir"
+                },
+                icon = null,
+                background = c.live,
+                content = Color.White,
+                onClick = onGoLive,
+                emphasized = true,
+                compact = compact,
             )
         }
-        Box(Modifier.weight(1f))
-        TransportButton(
-            label = if (state.isRecording) "Detener" else "Grabar",
-            icon = { Box(Modifier.size(10.dp).background(c.record, if (state.isRecording) RoundedCornerShape(2.dp) else CircleShape)) },
-            background = Color.Transparent,
-            content = c.textHigh,
-            onClick = onRecord,
-        )
-        TransportButton(
-            label = when {
-                state.isLive -> "Terminar"
-                destinationCount > 1 -> "Emitir · $destinationCount"
-                else -> "Emitir"
-            },
-            icon = null,
-            background = c.live,
-            content = Color.White,
-            onClick = onGoLive,
-            emphasized = true,
-        )
     }
 }
 
@@ -185,6 +196,9 @@ private fun TransportButton(
     content: Color,
     onClick: () -> Unit,
     emphasized: Boolean = false,
+    compact: Boolean = false,
+    /** Solo el icono; el texto queda para lectores de pantalla. */
+    iconOnly: Boolean = false,
 ) {
     val shape = RoundedCornerShape(Nexo.metrics.radiusSmall)
     Row(
@@ -193,12 +207,18 @@ private fun TransportButton(
             .clip(shape)
             .background(background)
             .border(Nexo.metrics.hairline, if (background == Color.Transparent) Nexo.colors.line else background, shape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = if (emphasized) 22.dp else 14.dp),
+            .clickable(onClickLabel = label, onClick = onClick)
+            .then(if (iconOnly) Modifier.semantics { contentDescription = label } else Modifier)
+            .padding(horizontal = if (compact || iconOnly) 10.dp else if (emphasized) 22.dp else 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         icon?.invoke()
-        Text(label.uppercase(), color = content, fontWeight = FontWeight.Bold, fontSize = 13.sp, letterSpacing = 1.sp)
+        if (!iconOnly) {
+            Text(
+                label.uppercase(), color = content, fontWeight = FontWeight.Bold, fontSize = 13.sp,
+                letterSpacing = if (compact) 0.5.sp else 1.sp, maxLines = 1, softWrap = false,
+            )
+        }
     }
 }

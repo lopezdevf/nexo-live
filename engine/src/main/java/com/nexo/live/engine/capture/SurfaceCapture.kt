@@ -13,7 +13,8 @@ sealed interface CaptureStatus {
     data object Running : CaptureStatus
     /** Listo y esperando datos externos (p. ej. que el PC empiece a enviar). No se reintenta. */
     data class Waiting(val message: String) : CaptureStatus
-    data class Error(val message: String) : CaptureStatus
+    /** [deviceBusy]: el sistema no deja abrir el dispositivo mientras otro siga abierto (límite de cámaras). */
+    data class Error(val message: String, val deviceBusy: Boolean = false) : CaptureStatus
 }
 
 interface CaptureListener {

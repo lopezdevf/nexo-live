@@ -6,6 +6,8 @@ package com.nexo.live.ui.studio
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -123,11 +125,13 @@ fun StudioScreen(vm: StudioViewModel, destinationsVm: DestinationsViewModel, onR
                     PrimaryAction("PERMITIR", onRequestPermissions)
                 }
             }
+            // El diseño depende del espacio real de la ventana, no de si es móvil o tablet: así también
+            // se adapta a la pantalla partida y a las ventanas emergentes
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                if (maxWidth > maxHeight) {
-                    LandscapeStudio(state, dockTab, destinations, actions)
-                } else {
-                    PortraitStudio(state, dockTab, destinations, actions, maxHeight)
+                when {
+                    maxWidth >= 1000.dp && maxHeight >= 600.dp -> TabletStudio(state, dockTab, destinations, actions, maxHeight)
+                    maxWidth > maxHeight && maxWidth >= 900.dp -> LandscapeStudio(state, dockTab, destinations, actions, maxWidth)
+                    else -> PortraitStudio(state, dockTab, destinations, actions, maxHeight)
                 }
             }
         }
@@ -231,8 +235,9 @@ private class StudioActions(
 
 /** Horizontal: escenas a la izquierda, lienzo al centro y dock a la derecha (mesa de control). */
 @Composable
-private fun LandscapeStudio(state: StudioState, dockTab: DockTab, destinations: DestinationsUi, actions: StudioActions) {
+private fun LandscapeStudio(state: StudioState, dockTab: DockTab, destinations: DestinationsUi, actions: StudioActions, screenWidth: Dp) {
     val vm = actions.vm
+    val narrow = screenWidth < 1000.dp
     Column(Modifier.fillMaxSize()) {
         StatusStrip(state, compact = false, onSettings = { vm.openSettings(true) })
         Row(
@@ -245,13 +250,52 @@ private fun LandscapeStudio(state: StudioState, dockTab: DockTab, destinations: 
                 onSelect = vm::selectScene,
                 onAdd = vm::addScene,
                 onRemove = actions.onRemoveScene,
-                modifier = Modifier.width(180.dp).fillMaxHeight().padding(bottom = 8.dp),
+                modifier = Modifier.width(if (narrow) 160.dp else 180.dp).fillMaxHeight().padding(bottom = 8.dp),
             )
-            Column(Modifier.weight(1f)) {
-                CanvasArea(state, vm, Modifier.weight(1f).fillMaxWidth())
+            // Lienzo y controles juntos, centrados: sin huecos entre la imagen y los botones
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.Center) {
+                CanvasArea(state, vm, Modifier.fillMaxWidth().weight(1f, fill = false))
                 TransportBar(state, destinations.enabledCount, vm::setStudioMode, vm::transition, vm::toggleRecording, actions.onGoLive)
             }
-            Dock(state, dockTab, destinations, actions, Modifier.width(320.dp).fillMaxHeight().padding(bottom = 8.dp))
+            Dock(state, dockTab, destinations, actions, Modifier.width(if (narrow) 300.dp else 320.dp).fillMaxHeight().padding(bottom = 8.dp))
+        }
+    }
+}
+
+/**
+ * Tablet o pantalla grande en horizontal: como OBS, el lienzo arriba y debajo las escenas y el
+ * mezclador siempre a la vista; fuentes y destinos en el panel lateral.
+ */
+@Composable
+private fun TabletStudio(state: StudioState, dockTab: DockTab, destinations: DestinationsUi, actions: StudioActions, screenHeight: Dp) {
+    val vm = actions.vm
+    val bottomHeight = (screenHeight * 0.32f).coerceIn(220.dp, 320.dp)
+    Column(Modifier.fillMaxSize()) {
+        StatusStrip(state, compact = false, onSettings = { vm.openSettings(true) })
+        Row(
+            Modifier.weight(1f).padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                CanvasArea(state, vm, Modifier.fillMaxWidth().weight(1f))
+                TransportBar(state, destinations.enabledCount, vm::setStudioMode, vm::transition, vm::toggleRecording, actions.onGoLive)
+                Row(Modifier.fillMaxWidth().height(bottomHeight), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ScenesPanel(
+                        state = state,
+                        vertical = true,
+                        onSelect = vm::selectScene,
+                        onAdd = vm::addScene,
+                        onRemove = actions.onRemoveScene,
+                        modifier = Modifier.width(240.dp).fillMaxHeight(),
+                    )
+                    Panel(Modifier.weight(1f).fillMaxHeight()) {
+                        PanelHeader("MEZCLADOR")
+                        MixerContent(state, vm)
+                    }
+                }
+            }
+            val sideTab = if (dockTab == DockTab.Mixer) DockTab.Sources else dockTab
+            Dock(state, sideTab, destinations, actions, Modifier.width(360.dp).fillMaxHeight(), tabs = listOf(DockTab.Sources, DockTab.Destinations))
         }
     }
 }
@@ -260,11 +304,14 @@ private fun LandscapeStudio(state: StudioState, dockTab: DockTab, destinations: 
 @Composable
 private fun PortraitStudio(state: StudioState, dockTab: DockTab, destinations: DestinationsUi, actions: StudioActions, screenHeight: Dp) {
     val vm = actions.vm
-    Column(Modifier.fillMaxSize()) {
+    // En ventanas bajitas (ventana emergente, pantalla partida) no cabe todo: se desplaza la pantalla entera
+    // y el dock conserva una altura usable
+    val short = screenHeight < 600.dp
+    Column(Modifier.fillMaxSize().then(if (short) Modifier.verticalScroll(rememberScrollState()) else Modifier)) {
         StatusStrip(state, compact = true, onSettings = { vm.openSettings(true) })
         // Un lienzo vertical en un móvil vertical sería más alto que la pantalla y taparía los controles:
         // se limita su altura y la vista previa encaja dentro conservando la proporción
-        CanvasArea(state, vm, Modifier.fillMaxWidth().heightIn(max = screenHeight * 0.42f).padding(horizontal = 8.dp))
+        CanvasArea(state, vm, Modifier.fillMaxWidth().heightIn(max = screenHeight * if (short) 0.6f else 0.42f).padding(horizontal = 8.dp))
         TransportBar(state, destinations.enabledCount, vm::setStudioMode, vm::transition, vm::toggleRecording, actions.onGoLive)
         ScenesPanel(
             state = state,
@@ -274,7 +321,10 @@ private fun PortraitStudio(state: StudioState, dockTab: DockTab, destinations: D
             onRemove = actions.onRemoveScene,
             modifier = Modifier.fillMaxWidth().height(104.dp).padding(horizontal = 8.dp),
         )
-        Dock(state, dockTab, destinations, actions, Modifier.weight(1f).fillMaxWidth().padding(8.dp))
+        Dock(
+            state, dockTab, destinations, actions,
+            if (short) Modifier.fillMaxWidth().height(360.dp).padding(8.dp) else Modifier.weight(1f).fillMaxWidth().padding(8.dp),
+        )
     }
 }
 
@@ -333,11 +383,18 @@ private fun CanvasArea(state: StudioState, vm: StudioViewModel, modifier: Modifi
 }
 
 @Composable
-private fun Dock(state: StudioState, tab: DockTab, destinations: DestinationsUi, actions: StudioActions, modifier: Modifier) {
+private fun Dock(
+    state: StudioState,
+    tab: DockTab,
+    destinations: DestinationsUi,
+    actions: StudioActions,
+    modifier: Modifier,
+    tabs: List<DockTab> = DockTab.entries,
+) {
     val vm = actions.vm
     val dvm = actions.destinationsVm
     Panel(modifier) {
-        DockTabs(DockTab.entries, tab, { it.label }, vm::showDock)
+        DockTabs(tabs, tab, { it.label }, vm::showDock)
         when (tab) {
             DockTab.Sources -> SourcesPanel(
                 state = state,
@@ -352,13 +409,7 @@ private fun Dock(state: StudioState, tab: DockTab, destinations: DestinationsUi,
                 needsScreenCapture = actions.needsScreenCapture,
                 onRequestScreenCapture = actions.onRequestScreenCapture,
             )
-            DockTab.Mixer -> {
-                val levels by vm.levels.collectAsStateWithLifecycle()
-                val errors by vm.audioErrors.collectAsStateWithLifecycle()
-                val inputs by vm.audioInputs.collectAsStateWithLifecycle()
-                val monitorStatus by vm.monitorStatus.collectAsStateWithLifecycle()
-                MixerPanel(state, levels, errors, inputs, monitorStatus, vm::setGain, vm::toggleMute, vm::openProperties)
-            }
+            DockTab.Mixer -> MixerContent(state, vm)
             DockTab.Destinations -> DestinationsPanel(
                 ui = destinations,
                 onAdd = dvm::openNew,
@@ -369,6 +420,15 @@ private fun Dock(state: StudioState, tab: DockTab, destinations: DestinationsUi,
             )
         }
     }
+}
+
+@Composable
+private fun MixerContent(state: StudioState, vm: StudioViewModel) {
+    val levels by vm.levels.collectAsStateWithLifecycle()
+    val errors by vm.audioErrors.collectAsStateWithLifecycle()
+    val inputs by vm.audioInputs.collectAsStateWithLifecycle()
+    val monitorStatus by vm.monitorStatus.collectAsStateWithLifecycle()
+    MixerPanel(state, levels, errors, inputs, monitorStatus, vm::setGain, vm::toggleMute, vm::openProperties)
 }
 
 @Composable

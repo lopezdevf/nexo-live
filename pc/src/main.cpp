@@ -527,9 +527,11 @@ void OnStatsTimer() {
     uint32_t frames = 0;
     uint64_t bytes = 0;
     int latency = -1;
-    app.streamer.TakeStats(frames, bytes, latency);
+    uint32_t bitrate = 0;
+    app.streamer.TakeStats(frames, bytes, latency, bitrate);
     wchar_t detail[300];
     std::wstring latencyText = latency >= 0 ? L" · retraso " + std::to_wstring(latency) + L" ms" : L"";
+    if (bitrate > 0 && bitrate < kQualities[std::max(0, ComboBox_GetCurSel(app.quality))].bitrateKbps) latencyText += L" · red lenta: calidad ajustada";
     _snwprintf_s(detail, _TRUNCATE, L"%u fps · %.1f Mbps%s\n%s", frames, bytes * 8 / 1'000'000.0, latencyText.c_str(),
                  app.streamer.EncoderName().c_str());
     SetStatus(app.status, kGood, detail);

@@ -76,6 +76,16 @@ class PcLinkReceiver(
     @Volatile var targetSampleRate = 48_000
 
     private val clock = ClockSync()
+
+    /**
+     * El ahorro de energía de la WiFi agrupa los paquetes y añade decenas o cientos de milisegundos
+     * de retraso irregular; mientras el PC está conectado se pide el modo de baja latencia.
+     */
+    private val wifiLock: WifiManager.WifiLock? = runCatching {
+        appContext.getSystemService(WifiManager::class.java)?.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "NexoPcLink")?.apply {
+            setReferenceCounted(false)
+        }
+    }.getOrNull()
     private var videoWidth = 0
     private var videoHeight = 0
     @Volatile private var latencyMs: Long? = null
@@ -111,6 +121,7 @@ class PcLinkReceiver(
 
     fun release() {
         released = true
+        runCatching { wifiLock?.release() }
         runCatching { server?.close() }
         session?.close()
         session = null
@@ -195,6 +206,7 @@ class PcLinkReceiver(
                 latencyMs = null
                 reportedLatencyMs = null
                 Log.i(TAG, "PC conectado: ${hello.pcName}")
+                runCatching { wifiLock?.acquire() }
                 publish(PcLinkStatus.Connected(hello.pcName, videoWidth, videoHeight, null))
                 requestKeyframe()
                 // La hora se pide cada segundo desde otro hilo: mide el retraso y mantiene viva la conexión
@@ -220,6 +232,7 @@ class PcLinkReceiver(
                 // Conexión cerrada por el PC o por la red
             } finally {
                 runCatching { socket.close() }
+                if (session === this) runCatching { wifiLock?.release() }
                 if (session === this && !released) {
                     session = null
                     if (status is PcLinkStatus.Connected) publish(PcLinkStatus.Waiting())

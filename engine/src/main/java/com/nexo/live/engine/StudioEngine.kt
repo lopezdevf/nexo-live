@@ -4,9 +4,11 @@
 package com.nexo.live.engine
 
 import android.content.Context
+import android.hardware.camera2.CameraManager
 import android.hardware.display.DisplayManager
 import android.media.MediaCodec
 import android.media.MediaFormat
+import android.os.Build
 import android.view.Display
 import android.view.Surface
 import com.nexo.live.engine.audio.AudioEngine
@@ -97,6 +99,16 @@ class StudioEngine(
         }
 
         override fun create(source: Source, canvas: CanvasConfig) = createCapture(source, canvas)
+
+        override fun canRunTogether(keyA: String, keyB: String): Boolean {
+            val a = keyA.removePrefix("camera:")
+            val b = keyB.removePrefix("camera:")
+            if (a == keyA || b == keyB) return true
+            // Sin la API de cámaras simultáneas (Android 11+) no se sabe: se intenta y, si el sistema la rechaza, se cierra la otra
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return true
+            val combos = runCatching { appContext.getSystemService(CameraManager::class.java).concurrentCameraIds }.getOrNull() ?: return true
+            return combos.any { a in it && b in it }
+        }
     })
 
     /** Receptores de vídeo y audio del PC, compartidos por compositor y mezclador. */

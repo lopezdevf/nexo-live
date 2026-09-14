@@ -57,6 +57,8 @@ public:
     uint64_t TakeSentBytes() { return sentBytes_.exchange(0); }
     /** Retraso de punta a punta en ms (captura → imagen en el móvil → aviso de vuelta), o -1 sin datos. */
     int LatencyMs() const { return latencyMs_; }
+    /** Veces que la red no dio abasto y se saltaron fotogramas desde la última llamada. */
+    uint32_t TakeCongestionEvents() { return congestionEvents_.exchange(0); }
 
 private:
     struct Packet {
@@ -85,6 +87,7 @@ private:
     std::mutex sendMutex_;
     std::atomic<uint64_t> sentBytes_{0};
     std::atomic<int> latencyMs_{-1};
+    std::atomic<uint32_t> congestionEvents_{0};
     int64_t windowSumUs_ = 0;
     int windowSamples_ = 0;
     int64_t windowStartUs_ = 0;

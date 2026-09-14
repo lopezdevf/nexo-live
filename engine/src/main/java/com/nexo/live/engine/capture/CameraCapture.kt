@@ -7,18 +7,23 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraDevice.StateCallback.ERROR_CAMERA_IN_USE
+import android.hardware.camera2.CameraDevice.StateCallback.ERROR_MAX_CAMERAS_IN_USE
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
+import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Range
 import android.util.Log
 import android.util.Size
+import android.view.Display
 import android.view.Surface
 import androidx.core.content.ContextCompat
 import java.util.concurrent.CountDownLatch
@@ -49,6 +54,28 @@ class CameraCapture(
     private var surface: Surface? = null
     @Volatile private var stopped = false
 
+    private val displayManager = appContext.getSystemService(DisplayManager::class.java)
+    private var formatListener: CaptureListener? = null
+    private var format: CaptureFormat? = null
+
+    /**
+     * Al girar el móvil o la tablet con la cámara abierta, la app no se recrea: la orientación de la
+     * imagen se corrige aquí sin reabrir la cámara.
+     */
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId != Display.DEFAULT_DISPLAY || stopped) return
+            val current = format ?: return
+            val rotation = (360 - displayRotation()) % 360
+            if (rotation == current.rotationDegrees) return
+            val updated = current.copy(rotationDegrees = rotation)
+            format = updated
+            formatListener?.onFormat(updated)
+        }
+    }
+
     override fun start(texture: SurfaceTexture, listener: CaptureListener) {
         if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             listener.onStatus(CaptureStatus.Error("Falta el permiso de cámara"))
@@ -65,7 +92,11 @@ class CameraCapture(
                 // en la orientación natural del móvil, solo falta compensar si el móvil está girado
                 val sensor = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
                 val (w, h) = if (sensor % 180 != 0) size.height to size.width else size.width to size.height
-                listener.onFormat(CaptureFormat(w, h, (360 - displayRotation()) % 360))
+                val initial = CaptureFormat(w, h, (360 - displayRotation()) % 360)
+                format = initial
+                formatListener = listener
+                listener.onFormat(initial)
+                displayManager?.registerDisplayListener(displayListener, handler)
 
                 @Suppress("MissingPermission")
                 manager.openCamera(cameraId, executor, object : CameraDevice.StateCallback() {
@@ -88,9 +119,13 @@ class CameraCapture(
                     override fun onError(camera: CameraDevice, error: Int) {
                         camera.close()
                         device = null
-                        listener.onStatus(CaptureStatus.Error(errorMessage(error)))
+                        val busy = error == ERROR_CAMERA_IN_USE || error == ERROR_MAX_CAMERAS_IN_USE
+                        listener.onStatus(CaptureStatus.Error(errorMessage(error), deviceBusy = busy))
                     }
                 })
+            } catch (e: CameraAccessException) {
+                val busy = e.reason == CameraAccessException.CAMERA_IN_USE || e.reason == CameraAccessException.MAX_CAMERAS_IN_USE
+                listener.onStatus(CaptureStatus.Error(if (busy) errorMessage(ERROR_MAX_CAMERAS_IN_USE) else "No se pudo abrir la cámara: ${e.message}", deviceBusy = busy))
             } catch (e: Exception) {
                 listener.onStatus(CaptureStatus.Error("No se pudo abrir la cámara: ${e.message}"))
             }
@@ -149,6 +184,8 @@ class CameraCapture(
         stopped = true
         val closed = CountDownLatch(1)
         handler.post {
+            runCatching { displayManager?.unregisterDisplayListener(displayListener) }
+            formatListener = null
             runCatching { session?.stopRepeating() }
             runCatching { session?.close() }
             runCatching { device?.close() }

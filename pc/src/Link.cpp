@@ -175,7 +175,9 @@ ConnectResult LinkSession::Connect(const std::string& ip, uint16_t port, uint16_
 
     BOOL on = TRUE;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&on), sizeof(on));
-    int sendBuffer = 1 << 20;
+    // Búfer pequeño: con la red saturada la cola detecta el atasco en decenas de milisegundos y salta
+    // fotogramas, en lugar de acumular medio segundo de vídeo dentro del sistema
+    int sendBuffer = 256 * 1024;
     setsockopt(s, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&sendBuffer), sizeof(sendBuffer));
     DWORD timeout = 5000;
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
@@ -282,6 +284,7 @@ void LinkSession::Enqueue(Packet&& packet) {
                 // La red va por detrás: se tira el vídeo pendiente y se salta al presente
                 std::erase_if(queue_, [](const Packet& p) { return p.video; });
                 queuedVideoFrames_ = 0;
+                congestionEvents_++;
                 if (!packet.keyframe) {
                     dropUntilKeyframe_ = true;
                     wantKeyframe = true;

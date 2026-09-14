@@ -48,6 +48,9 @@ public:
     void SubmitFrame(ID3D11Texture2D* frame, int64_t captureUs);
     /** Codifica el siguiente fotograma como clave; si la pantalla está quieta, repite el último. */
     void RequestKeyframe();
+    /** Cambia el bitrate sin reiniciar el codificador (bitrate adaptativo). */
+    void SetBitrate(uint32_t kbps);
+    uint32_t BitrateKbps() const { return currentKbps_; }
 
     const std::wstring& Name() const { return name_; }
     bool Hardware() const { return hardware_; }
@@ -106,6 +109,7 @@ private:
     std::atomic<bool> forceKeyframe_{true};
     std::atomic<bool> running_{false};
     std::atomic<uint32_t> encodedFrames_{0};
+    std::atomic<uint32_t> currentKbps_{0};
     std::thread eventThread_;
 };
 

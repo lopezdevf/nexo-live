@@ -61,7 +61,7 @@ public:
     std::wstring EncoderName();
     std::wstring LastError();
     /** fps codificados y kbps enviados desde la última llamada. */
-    void TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs);
+    void TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs, uint32_t& bitrateKbps);
 
     /** Se llama desde otros hilos cada vez que cambia el estado. */
     std::function<void()> onStateChanged;
@@ -71,6 +71,7 @@ private:
     bool StartPipeline(const StreamSettings& settings);
     void StopPipeline();
     void SetState(StreamState state, const std::wstring& error = {});
+    void AdaptBitrate();
 
     std::thread worker_;
     std::mutex mutex_;
@@ -80,6 +81,8 @@ private:
     std::atomic<StreamState> state_{StreamState::Idle};
     std::wstring device_;
     std::wstring encoderName_;
+    uint32_t targetKbps_ = 0;
+    int stableSeconds_ = 0;
     std::wstring error_;
 
     LinkSession link_;

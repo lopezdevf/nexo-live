@@ -72,6 +72,7 @@ bool VideoEncoder::Start(ID3D11Device* device, const Config& config, PacketCallb
     }
     forceKeyframe_ = true;
     running_ = true;
+    currentKbps_ = config.bitrateKbps;
 
     if (!config_.forceSoftware && SUCCEEDED(MFCreateDXGIDeviceManager(&resetToken_, manager_.put())) &&
         SUCCEEDED(manager_->ResetDevice(device_.get(), resetToken_)) && CreateHardwareEncoder()) {
@@ -374,6 +375,16 @@ void VideoEncoder::SubmitFrame(ID3D11Texture2D* frame, int64_t captureUs) {
     } else {
         SoftwareEncode(sample.get());
     }
+}
+
+void VideoEncoder::SetBitrate(uint32_t kbps) {
+    std::lock_guard lock(mutex_);
+    if (!running_ || !transform_ || kbps == currentKbps_) return;
+    winrt::com_ptr<ICodecAPI> codec;
+    if (FAILED(transform_->QueryInterface(__uuidof(ICodecAPI), codec.put_void()))) return;
+    SetUInt(codec.get(), CODECAPI_AVEncCommonMeanBitRate, kbps * 1000);
+    currentKbps_ = kbps;
+    Log(L"Bitrate: %u kbps", kbps);
 }
 
 void VideoEncoder::RequestKeyframe() {

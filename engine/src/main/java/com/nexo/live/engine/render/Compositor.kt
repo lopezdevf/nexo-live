@@ -8,6 +8,7 @@ import android.opengl.GLES20
 import android.opengl.Matrix
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import android.util.Log
@@ -38,6 +39,9 @@ interface CaptureFactory {
 
     /** null si la fuente no captura de un dispositivo (imagen, texto, color). */
     fun create(source: Source, canvas: CanvasConfig): SurfaceCapture?
+
+    /** false si el sistema no deja tener abiertos a la vez los dispositivos de estas dos claves. */
+    fun canRunTogether(keyA: String, keyB: String): Boolean = true
 }
 
 /**
@@ -117,9 +121,9 @@ class Compositor(
             running = false
             handler.removeCallbacks(tick)
             releaseRenderers()
-            previews.values.forEach { egl?.releaseSurface(it.eglSurface) }
+            previews.values.forEach { releaseTarget(it) }
             previews.clear()
-            encoder?.let { egl?.releaseSurface(it.eglSurface) }
+            encoder?.let { releaseTarget(it) }
             encoder = null
             programFb?.release()
             previewFb?.release()
@@ -131,25 +135,66 @@ class Compositor(
         bitmapWorker.shutdown()
     }
 
-    /** [surface] null quita la vista previa (p. ej. la app pasa a segundo plano). */
-    fun setPreviewSurface(slot: PreviewSlot, surface: Surface?, width: Int, height: Int) = post {
-        previews.remove(slot)?.let { egl?.releaseSurface(it.eglSurface) }
-        if (surface != null && surface.isValid) {
-            egl?.let { previews[slot] = Target(surface, it.createWindowSurface(surface), width, height) }
+    /**
+     * [surface] null quita la vista previa (p. ej. la app pasa a segundo plano). Quitarla espera a que
+     * el compositor suelte la superficie: después Android la destruye y no se puede seguir dibujando.
+     */
+    fun setPreviewSurface(slot: PreviewSlot, surface: Surface?, width: Int, height: Int) {
+        val block = {
+            val current = previews[slot]
+            if (surface != null && current != null && current.surface === surface) {
+                // Misma ventana con otro tamaño (girar, pantalla partida, ventana emergente): se conserva
+                previews[slot] = Target(surface, current.eglSurface, width, height)
+            } else {
+                previews.remove(slot)?.let { releaseTarget(it) }
+                if (surface != null && surface.isValid) {
+                    createTarget(surface, width, height)?.let { previews[slot] = it }
+                }
+            }
         }
+        if (surface == null) postAndWait(block) else post(block)
     }
 
     /** Superficie de entrada del codificador de vídeo; null al detener la salida. */
     fun setEncoderSurface(surface: Surface?, width: Int, height: Int) = post {
-        encoder?.let { egl?.releaseSurface(it.eglSurface) }
+        encoder?.let { releaseTarget(it) }
         encoder = null
-        if (surface != null) {
-            egl?.let { encoder = Target(surface, it.createWindowSurface(surface), width, height) }
+        if (surface != null) encoder = createTarget(surface, width, height)
+    }
+
+    private fun createTarget(surface: Surface, width: Int, height: Int): Target? {
+        val e = egl ?: return null
+        return try {
+            Target(surface, e.createWindowSurface(surface), width, height)
+        } catch (ex: Exception) {
+            // Una ventana que se está destruyendo no debe tumbar el compositor: se reintenta en el siguiente cambio
+            Log.w(TAG, "No se pudo usar la superficie ${width}x$height", ex)
+            null
         }
+    }
+
+    private fun releaseTarget(target: Target) {
+        val e = egl ?: return
+        // Una superficie EGL activa no se destruye hasta dejar de estarlo; mientras tanto la ventana
+        // sigue ocupada y crear otra encima falla con EGL_BAD_ALLOC
+        runCatching { e.makeOffscreenCurrent() }
+        e.releaseSurface(target.eglSurface)
     }
 
     private fun post(block: () -> Unit) {
         if (::handler.isInitialized) handler.post(block)
+    }
+
+    private fun postAndWait(block: () -> Unit) {
+        if (!::handler.isInitialized) return
+        if (Looper.myLooper() == handler.looper) {
+            block()
+            return
+        }
+        val done = java.util.concurrent.CountDownLatch(1)
+        if (handler.post { try { block() } finally { done.countDown() } }) {
+            done.await(1, java.util.concurrent.TimeUnit.SECONDS)
+        }
     }
 
     // ---- Bucle de render -----------------------------------------------------------------------
@@ -344,7 +389,18 @@ class Compositor(
 
         for ((key, source) in usedKeys) {
             lastUsed[key] = nowMs
-            if (renderers.containsKey(key) && !retryDue(key, nowMs)) continue
+            val exists = renderers.containsKey(key)
+            val busy = (keyStatus[key] as? CaptureStatus.Error)?.deviceBusy == true
+            // Una cámara que ya no se ve se mantiene abierta unos segundos por si se vuelve a la escena, pero
+            // en muchos móviles y tablets solo cabe una: se cierra antes de abrir la nueva, o si el sistema la rechaza
+            if (!exists || busy) {
+                val idle = renderers.keys.filter { it !in usedKeys && (busy || !captureFactory.canRunTogether(it, key)) && isCamera(it) }
+                if (idle.isNotEmpty() && isCamera(key)) {
+                    idle.forEach { releaseKey(it) }
+                    if (busy) createdAt[key] = 0L
+                }
+            }
+            if (exists && !retryDue(key, nowMs)) continue
             renderers.remove(key)?.release()
             keyStatus.remove(key)
             renderers[key] = createRenderer(key, source, canvas)
@@ -353,15 +409,19 @@ class Compositor(
 
         val liveKeys = state.sources.values.filter { it.hasVideo }.map { keyOf(it) }.toSet()
         val stale = renderers.keys.filter { (it !in usedKeys && nowMs - (lastUsed[it] ?: 0L) > UNUSED_RELEASE_MS) || it !in liveKeys }
-        for (key in stale) {
-            renderers.remove(key)?.release()
-            lastUsed.remove(key)
-            createdAt.remove(key)
-            retries.remove(key)
-            keyStatus.remove(key)
-        }
+        stale.forEach(::releaseKey)
         publishStatus(state)
     }
+
+    private fun releaseKey(key: String) {
+        renderers.remove(key)?.release()
+        lastUsed.remove(key)
+        createdAt.remove(key)
+        retries.remove(key)
+        keyStatus.remove(key)
+    }
+
+    private fun isCamera(key: String) = key.startsWith("camera:")
 
     /** Traduce el estado de cada captura compartida a cada fuente que la usa. */
     private fun publishStatus(state: com.nexo.live.engine.studio.StudioState) {
@@ -383,7 +443,7 @@ class Compositor(
         if (status !is CaptureStatus.Error) return false
         val attempt = retries[key] ?: 0
         val wait = minOf(RETRY_BASE_MS shl attempt.coerceAtMost(4), RETRY_MAX_MS)
-        if (nowMs - (createdAt[key] ?: 0L) < wait) return false
+        if (createdAt[key] != 0L && nowMs - (createdAt[key] ?: 0L) < wait) return false
         retries[key] = attempt + 1
         return true
     }
