@@ -26,7 +26,10 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      # Sin «packages», la acción pide el paquete «tools», que el sdkmanager actual ya no tiene y hace fallar el paso
       - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
 
       - uses: gradle/actions/setup-gradle@v6
         with:
