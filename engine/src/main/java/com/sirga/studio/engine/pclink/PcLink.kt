@@ -68,6 +68,9 @@ class PcLinkReceiver(
     @Volatile var status: PcLinkStatus = PcLinkStatus.Waiting()
         private set
 
+    /** true cuando el puerto está abierto: solo entonces se anuncia al PC en el descubrimiento. */
+    val listening: Boolean get() = server != null && !released
+
     /** Estado y formato hacia la fuente de vídeo. */
     @Volatile var videoListener: CaptureListener? = null
 
@@ -136,7 +139,7 @@ class PcLinkReceiver(
                 bind(InetSocketAddress(port))
             }
         } catch (e: IOException) {
-            publish(PcLinkStatus.Error("El puerto $port está ocupado. Elige otro en las propiedades."))
+            publish(PcLinkStatus.Error("El puerto $port lo está usando otra app o el propio sistema del móvil. Cambia el puerto en las propiedades de la fuente."))
             return
         }
         server = socket
@@ -376,6 +379,7 @@ internal class PcLinkDiscovery(context: Context) {
                 s.receive(packet)
                 if (!SirgaLink.isDiscoveryQuery(packet.data, packet.length)) continue
                 for (receiver in receivers) {
+                    if (!receiver.listening) continue
                     val reply = SirgaLink.discoveryReply(receiver.port, receiver.deviceName, receiver.discoveryName)
                     s.send(DatagramPacket(reply, reply.size, packet.socketAddress))
                 }
@@ -389,6 +393,20 @@ internal class PcLinkDiscovery(context: Context) {
 
 /** Direcciones y textos de ayuda del enlace con el PC. */
 object PcLinkAddresses {
+
+    /**
+     * Primer puerto desde [from] que no usa otra fuente ([taken]) y que se puede abrir en este móvil:
+     * algunos fabricantes tienen servicios del sistema escuchando en puertos como el 9000.
+     */
+    fun firstFreePort(from: Int, taken: Set<Int>): Int =
+        (from until from + 100).firstOrNull { port ->
+            port !in taken && runCatching {
+                ServerSocket().use {
+                    it.reuseAddress = true
+                    it.bind(InetSocketAddress(port))
+                }
+            }.isSuccess
+        } ?: generateSequence(from) { it + 1 }.first { it !in taken }
 
     /** Direcciones IPv4 útiles: WiFi, zona WiFi del móvil y anclaje USB. */
     fun localAddresses(): List<LinkAddress> = runCatching {

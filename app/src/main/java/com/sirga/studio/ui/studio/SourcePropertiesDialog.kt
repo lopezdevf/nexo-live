@@ -109,7 +109,8 @@ fun SourcePropertiesDialog(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 SirgaField(value = source.name, onValueChange = onRename, label = "Nombre")
-                model.error?.let { Callout(it, Sirga.colors.record) }
+                // La fuente PC muestra su estado dentro de su propia sección: aquí saldría repetido
+                if (source !is Source.PcInput) model.error?.let { Callout(it, Sirga.colors.record) }
 
                 when (source) {
                     is Source.Camera -> CameraSection(source, model.cameras, onUpdate)

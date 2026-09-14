@@ -152,7 +152,7 @@ class Sender:
         self.sent_bytes = 0
         self.send_wait = 0.0  # segundos bloqueado enviando: la red no da abasto
         name_bytes = name.encode()
-        self.sock.sirgall(MAGIC + struct.pack(">HH", code, len(name_bytes)) + name_bytes)
+        self.sock.sendall(MAGIC + struct.pack(">HH", code, len(name_bytes)) + name_bytes)
         reply = self._recv(5)
         if reply[:4] != MAGIC:
             raise SystemExit("El móvil no respondió con Sirga Link")
@@ -192,7 +192,7 @@ class Sender:
         data = struct.pack(">BI", kind, len(payload)) + payload
         with self.lock:
             start = time.perf_counter()
-            self.sock.sirgall(data)
+            self.sock.sendall(data)
             self.send_wait += time.perf_counter() - start
             self.sent_bytes += len(data)
 

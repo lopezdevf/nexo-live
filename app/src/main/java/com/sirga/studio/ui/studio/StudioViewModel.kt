@@ -20,6 +20,7 @@ import com.sirga.studio.engine.model.Source
 import com.sirga.studio.engine.model.SourceKind
 import com.sirga.studio.engine.model.Transform
 import com.sirga.studio.engine.model.kind
+import com.sirga.studio.engine.pclink.PcLinkAddresses
 import com.sirga.studio.engine.render.PreviewSlot
 import com.sirga.studio.engine.service.StudioService
 import com.sirga.studio.engine.settings.StudioSettings
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
@@ -107,6 +109,19 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     // ---- Fuentes -------------------------------------------------------------------------
 
     fun addSource(kind: SourceKind) {
+        if (kind == SourceKind.PcInput) {
+            // Comprobar qué puertos se pueden abrir toca la red: fuera del hilo principal
+            val taken = state.value.sources.values.filterIsInstance<Source.PcInput>().map { it.port }.toSet()
+            viewModelScope.launch(Dispatchers.IO) {
+                val port = PcLinkAddresses.firstFreePort(from = 9000, taken = taken)
+                withContext(Dispatchers.Main) { addSource(kind, port) }
+            }
+            return
+        }
+        addSource(kind, pcPort = 0)
+    }
+
+    private fun addSource(kind: SourceKind, pcPort: Int) {
         val id = UUID.randomUUID().toString()
         val existing = state.value.sources.values
         val count = existing.count { it.kind == kind }
@@ -116,7 +131,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         val source = when (kind) {
             SourceKind.Camera -> Source.Camera(id, name, Facing.Back)
             SourceKind.UsbCamera -> Source.UsbCamera(id, name)
-            SourceKind.PcInput -> Source.PcInput(id, name, port = generateSequence(9000) { it + 1 }.first { p -> existing.none { it is Source.PcInput && it.port == p } })
+            SourceKind.PcInput -> Source.PcInput(id, name, port = pcPort)
             SourceKind.Screen -> Source.Screen(id, name)
             SourceKind.Image -> return // se añade tras elegir la imagen
             SourceKind.Text -> Source.Text(id, name, text = "Texto nuevo", backgroundArgb = 0x99000000)
