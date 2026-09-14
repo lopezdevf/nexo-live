@@ -158,6 +158,7 @@ bool Streamer::StartPipeline(const StreamSettings& settings) {
                 quality, config.width, config.height);
         config.fps = quality.fps;
         config.bitrateKbps = quality.bitrateKbps;
+        config.forceSoftware = settings.forceSoftware;
 
         if (!encoder_.Start(device.get(), config, [this](const uint8_t* data, size_t size, bool keyframe, int64_t captureUs) {
                 link_.SendVideoFrame(data, size, keyframe, captureUs);

@@ -8,7 +8,7 @@
 #   cmake --build build --config Release
 
 cmake_minimum_required(VERSION 3.24)
-project(NexoLivePC VERSION 1.0.0 LANGUAGES CXX RC)
+project(NexoLivePC VERSION 0.2.0 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

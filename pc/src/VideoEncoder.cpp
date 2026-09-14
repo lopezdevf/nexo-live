@@ -73,8 +73,8 @@ bool VideoEncoder::Start(ID3D11Device* device, const Config& config, PacketCallb
     forceKeyframe_ = true;
     running_ = true;
 
-    if (SUCCEEDED(MFCreateDXGIDeviceManager(&resetToken_, manager_.put())) && SUCCEEDED(manager_->ResetDevice(device_.get(), resetToken_)) &&
-        CreateHardwareEncoder()) {
+    if (!config_.forceSoftware && SUCCEEDED(MFCreateDXGIDeviceManager(&resetToken_, manager_.put())) &&
+        SUCCEEDED(manager_->ResetDevice(device_.get(), resetToken_)) && CreateHardwareEncoder()) {
         eventThread_ = std::thread([this] { EventLoop(); });
     } else if (!CreateSoftwareEncoder()) {
         running_ = false;

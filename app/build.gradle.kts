@@ -1,9 +1,20 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Copyright (C) 2026 Nexo Live contributors
 
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+/**
+ * Firma de publicación: fuera del repositorio, en ~/.nexolive/firma.properties (o la ruta de la
+ * variable NEXO_SIGNING). Sin ese archivo, la versión release se genera sin firmar.
+ */
+val signing = Properties().apply {
+    val file = System.getenv("NEXO_SIGNING")?.let(::File) ?: File(System.getProperty("user.home"), ".nexolive/firma.properties")
+    if (file.isFile) file.inputStream().use(::load)
 }
 
 android {
@@ -14,12 +25,24 @@ android {
         applicationId = "com.nexo.live"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+    }
+
+    signingConfigs {
+        if (signing.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = file(signing.getProperty("storeFile"))
+                storePassword = signing.getProperty("storePassword")
+                keyAlias = signing.getProperty("keyAlias")
+                keyPassword = signing.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             // Móviles reales: fuera las librerías nativas x86 de UVC que solo usan los emuladores

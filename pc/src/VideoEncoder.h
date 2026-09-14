@@ -34,6 +34,8 @@ public:
         uint32_t height = 1080;
         uint32_t fps = 60;
         uint32_t bitrateKbps = 15000;
+        /** Salta el codificador de la gráfica (controladores con fallos o pruebas). */
+        bool forceSoftware = false;
     };
     using PacketCallback = std::function<void(const uint8_t* data, size_t size, bool keyframe, int64_t captureUs)>;
 

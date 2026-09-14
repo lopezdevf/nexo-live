@@ -77,6 +77,7 @@ struct App {
     COLORREF statusColor = kTextMid;
     std::wstring detail;
     bool autoConnect = false;
+    bool forceSoftware = false;
     std::wstring settingsPath;
 };
 
@@ -165,7 +166,17 @@ void ApplyLayout() {
 void ResizeWindow() {
     RECT rc = R(0, 0, kWidth, 740);
     AdjustWindowRectExForDpi(&rc, WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX), FALSE, 0, app.dpi);
-    SetWindowPos(app.hwnd, nullptr, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    int width = rc.right - rc.left;
+    int height = rc.bottom - rc.top;
+    // Que la ventana entera quepa sobre la barra de tareas
+    RECT window;
+    GetWindowRect(app.hwnd, &window);
+    MONITORINFO monitor{sizeof(monitor)};
+    GetMonitorInfoW(MonitorFromWindow(app.hwnd, MONITOR_DEFAULTTONEAREST), &monitor);
+    const RECT& work = monitor.rcWork;
+    int x = std::clamp(static_cast<int>(window.left), static_cast<int>(work.left), std::max(static_cast<int>(work.left), static_cast<int>(work.right) - width));
+    int y = std::clamp(static_cast<int>(window.top), static_cast<int>(work.top), std::max(static_cast<int>(work.top), static_cast<int>(work.bottom) - height));
+    SetWindowPos(app.hwnd, nullptr, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 // ---- Ajustes -------------------------------------------------------------------------------
@@ -326,6 +337,7 @@ void ToggleConnection() {
     settings.quality = static_cast<size_t>(std::max(0, ComboBox_GetCurSel(app.quality)));
     settings.audio = app.audioOn;
     settings.cursor = app.cursorOn;
+    settings.forceSoftware = app.forceSoftware;
     SaveSettings();
     app.streamer.Start(settings);
     UpdateControls();
@@ -645,7 +657,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-/** `--connect IP:PUERTO --code 1234 [--quality N] [--monitor N] [--no-audio]`: conecta al abrir (útil en accesos directos). */
+/** `--connect IP:PUERTO --code 1234 [--quality N] [--monitor N] [--no-audio] [--software]`: conecta al abrir (útil en accesos directos). */
 void ParseCommandLine() {
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -663,6 +675,8 @@ void ParseCommandLine() {
             WritePrivateProfileStringW(L"Nexo", L"calidad", next().c_str(), app.settingsPath.c_str());
         } else if (arg == L"--monitor") {
             WritePrivateProfileStringW(L"Nexo", L"pantalla", next().c_str(), app.settingsPath.c_str());
+        } else if (arg == L"--software") {
+            app.forceSoftware = true;
         } else if (arg == L"--no-audio") {
             WritePrivateProfileStringW(L"Nexo", L"audio", L"0", app.settingsPath.c_str());
         }

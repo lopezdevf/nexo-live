@@ -54,4 +54,6 @@ jobs:
         run: |
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "Nexo Live $TAG" --generate-notes
-          gh release upload "$TAG" NexoLivePC.exe --repo "$GITHUB_REPOSITORY" --clobber
+          # Si ya se subió a mano (con su suma SHA-256 en las notas), no se reemplaza
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -qx NexoLivePC.exe \
+            || gh release upload "$TAG" NexoLivePC.exe --repo "$GITHUB_REPOSITORY"

@@ -38,6 +38,7 @@ struct StreamSettings {
     size_t quality = 0;
     bool audio = true;
     bool cursor = true;
+    bool forceSoftware = false;
 };
 
 enum class StreamState { Idle, Connecting, Streaming, WrongCode, Retrying, Failed };

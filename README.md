@@ -13,6 +13,19 @@ pensado desde cero para el móvil.
 > grabación, emisión a Twitch en 1080p60, mezclador y la fuente PC con Nexo Live PC por WiFi. **Aún falta
 > probarlo en más móviles**; si lo pruebas, cuéntanos cómo va en *issues*.
 
+## Descargar
+
+| | Enlace | Requisitos |
+|---|---|---|
+| **Nexo Live** (móvil) | [NexoLive.apk](https://github.com/lopezdevf/nexo-live/releases/latest/download/NexoLive.apk) | Android 10 o posterior |
+| **Nexo Live PC** (opcional) | [NexoLivePC.exe](https://github.com/lopezdevf/nexo-live/releases/latest/download/NexoLivePC.exe) | Windows 10 (1903) u 11, 64 bits |
+
+Todas las versiones y sus notas: [Releases](https://github.com/lopezdevf/nexo-live/releases).
+
+- **Android:** al abrir el APK, permite «Instalar apps desconocidas» para el navegador o el gestor de archivos.
+- **Windows:** el programa aún no está firmado con un certificado de pago, así que SmartScreen puede avisar la
+  primera vez: «Más información» → «Ejecutar de todas formas». No hace falta instalarlo.
+
 ## Características
 
 | Área | Qué incluye |
@@ -69,8 +82,14 @@ Tests del motor:
 ./gradlew :engine:testDebugUnitTest
 ```
 
-Estructura: `engine/` (modelo, salida, audio, térmica; sin UI) y `app/` (Jetpack Compose).
-La arquitectura está explicada en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
+Versión firmada para publicar: `./gradlew assembleRelease` firma con la clave de
+`~/.nexolive/firma.properties` (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`) o la ruta de la
+variable `NEXO_SIGNING`; sin ese archivo, el APK release sale sin firmar.
+
+Nexo Live PC (Windows, C++ con el SDK de Windows): `pc\build.cmd`. Más en [docs/PC.md](docs/PC.md).
+
+Estructura: `engine/` (modelo, salida, audio, térmica; sin UI), `app/` (Jetpack Compose) y `pc/`
+(Nexo Live PC). La arquitectura está explicada en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
 
 ## Hoja de ruta
 
