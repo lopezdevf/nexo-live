@@ -539,7 +539,8 @@ void OnStatsTimer() {
     uint64_t bytes = 0;
     int latency = -1;
     uint32_t bitrate = 0;
-    app.streamer.TakeStats(frames, bytes, latency, bitrate);
+    uint32_t keyframes = 0;
+    app.streamer.TakeStats(frames, bytes, latency, bitrate, keyframes);
     wchar_t detail[300];
     std::wstring latencyText = latency >= 0 ? L" · retraso " + std::to_wstring(latency) + L" ms" : L"";
     if (bitrate > 0 && bitrate < kQualities[std::max(0, ComboBox_GetCurSel(app.quality))].bitrateKbps) latencyText += L" · red lenta: calidad ajustada";
@@ -547,7 +548,16 @@ void OnStatsTimer() {
                  app.streamer.EncoderName().c_str());
     SetStatus(app.status, kGood, detail);
     static int ticks = 0;
-    if (++ticks % 5 == 0) Log(L"Estadísticas: %u fps, %.1f Mbps enviados, bitrate %u kbps, retraso %d ms", frames, bytes * 8 / 1'000'000.0, bitrate, latency);
+    static uint32_t windowKeyframes = 0;
+    static uint64_t windowBytes = 0;
+    windowKeyframes += keyframes;
+    windowBytes += bytes;
+    if (++ticks % 5 == 0) {
+        Log(L"Estadísticas: %u fps, %.1f Mbps enviados (media 5 s %.1f), bitrate %u kbps, retraso %d ms, %u fotogramas clave en 5 s", frames,
+            bytes * 8 / 1'000'000.0, windowBytes * 8 / 5'000'000.0, bitrate, latency, windowKeyframes);
+        windowKeyframes = 0;
+        windowBytes = 0;
+    }
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {

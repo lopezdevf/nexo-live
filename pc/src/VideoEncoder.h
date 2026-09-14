@@ -55,6 +55,8 @@ public:
     const std::wstring& Name() const { return name_; }
     bool Hardware() const { return hardware_; }
     uint32_t TakeEncodedFrames() { return encodedFrames_.exchange(0); }
+    /** Fotogramas clave emitidos (los del GOP y los pedidos) desde la última llamada. */
+    uint32_t TakeKeyframes() { return keyframes_.exchange(0); }
 
 private:
     bool CreateConverter(uint32_t inWidth, uint32_t inHeight);
@@ -109,6 +111,8 @@ private:
     std::atomic<bool> forceKeyframe_{true};
     std::atomic<bool> running_{false};
     std::atomic<uint32_t> encodedFrames_{0};
+    std::atomic<uint32_t> keyframes_{0};
+    std::atomic<int64_t> lastKeyframeRequestUs_{0};
     std::atomic<uint32_t> currentKbps_{0};
     std::thread eventThread_;
 };

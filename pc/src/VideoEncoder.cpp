@@ -388,6 +388,12 @@ void VideoEncoder::SetBitrate(uint32_t kbps) {
 }
 
 void VideoEncoder::RequestKeyframe() {
+    // Con la red atascada llegan peticiones seguidas (del móvil y del descarte de la cola). Cada fotograma clave
+    // pesa varias veces más que uno normal: atenderlas todas vuelve a llenar la red. Como mucho una por segundo;
+    // mientras tanto el móvil espera a esa o a la siguiente del GOP (cada 2 s).
+    int64_t now = NowUs();
+    if (now - lastKeyframeRequestUs_.load() < 1'000'000) return;
+    lastKeyframeRequestUs_ = now;
     forceKeyframe_ = true;
     std::lock_guard lock(mutex_);
     if (!running_ || !hasFrame_ || pending_) return;
@@ -596,6 +602,7 @@ void VideoEncoder::Deliver(IMFSample* sample) {
         onPacket_(data, length, keyframe, time / 10);
     }
     encodedFrames_++;
+    if (keyframe) keyframes_++;
     buffer->Unlock();
 }
 

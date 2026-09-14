@@ -67,8 +67,9 @@ std::wstring Streamer::LastError() {
     return error_;
 }
 
-void Streamer::TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs, uint32_t& bitrateKbps) {
+void Streamer::TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs, uint32_t& bitrateKbps, uint32_t& keyframes) {
     frames = encoder_.TakeEncodedFrames();
+    keyframes = encoder_.TakeKeyframes();
     bytes = link_.TakeSentBytes();
     latencyMs = link_.LatencyMs();
     bitrateKbps = encoder_.BitrateKbps();
