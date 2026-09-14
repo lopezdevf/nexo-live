@@ -268,7 +268,7 @@ void StartDiscovery() {
     app.searching = true;
     HWND hwnd = app.hwnd;
     std::thread([hwnd] {
-        auto phones = new std::vector<PhoneInfo>(DiscoverPhones(1200));
+        auto phones = new std::vector<PhoneInfo>(DiscoverPhones(2500));
         if (!PostMessageW(hwnd, WM_APP_PHONES, 0, reinterpret_cast<LPARAM>(phones))) delete phones;
     }).detach();
 }
@@ -540,7 +540,8 @@ void OnStatsTimer() {
     int latency = -1;
     uint32_t bitrate = 0;
     uint32_t keyframes = 0;
-    app.streamer.TakeStats(frames, bytes, latency, bitrate, keyframes);
+    uint64_t encoded = 0;
+    app.streamer.TakeStats(frames, bytes, latency, bitrate, keyframes, encoded);
     wchar_t detail[300];
     std::wstring latencyText = latency >= 0 ? L" · retraso " + std::to_wstring(latency) + L" ms" : L"";
     if (bitrate > 0 && bitrate < kQualities[std::max(0, ComboBox_GetCurSel(app.quality))].bitrateKbps) latencyText += L" · red lenta: calidad ajustada";
@@ -550,13 +551,16 @@ void OnStatsTimer() {
     static int ticks = 0;
     static uint32_t windowKeyframes = 0;
     static uint64_t windowBytes = 0;
+    static uint64_t windowEncoded = 0;
     windowKeyframes += keyframes;
     windowBytes += bytes;
+    windowEncoded += encoded;
     if (++ticks % 5 == 0) {
-        Log(L"Estadísticas: %u fps, %.1f Mbps enviados (media 5 s %.1f), bitrate %u kbps, retraso %d ms, %u fotogramas clave en 5 s", frames,
-            bytes * 8 / 1'000'000.0, windowBytes * 8 / 5'000'000.0, bitrate, latency, windowKeyframes);
+        Log(L"Estadísticas: %u fps, %.1f Mbps enviados (media 5 s %.1f), %.1f Mbps codificados (media 5 s), bitrate %u kbps, retraso %d ms, %u fotogramas clave en 5 s",
+            frames, bytes * 8 / 1'000'000.0, windowBytes * 8 / 5'000'000.0, windowEncoded * 8 / 5'000'000.0, bitrate, latency, windowKeyframes);
         windowKeyframes = 0;
         windowBytes = 0;
+        windowEncoded = 0;
     }
 }
 

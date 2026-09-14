@@ -24,7 +24,7 @@ struct PhoneInfo {
     std::wstring source;
 };
 
-/** Envía «SGL1?» por difusión y recoge las respuestas durante [timeoutMs]. */
+/** Envía «SGL1?» por difusión y a cada equipo de la red local, y recoge las respuestas durante [timeoutMs]. */
 std::vector<PhoneInfo> DiscoverPhones(int timeoutMs);
 
 enum class ConnectResult { Ok, WrongCode, Unreachable, NotSirga };

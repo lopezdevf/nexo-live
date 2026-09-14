@@ -120,11 +120,18 @@ def load_h264(path):
 
 # ---- Protocolo ----------------------------------------------------------------------------------
 
-def discover(timeout=1.5):
+def discover(timeout=3.0):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.settimeout(0.3)
     sock.sendto(b"SGL1?", ("255.255.255.255", DISCOVERY_PORT))
+    # Algunas WiFi no entregan la difusión a todos los clientes: se pregunta también a cada equipo del /24
+    for local in {ip for ip in socket.gethostbyname_ex(socket.gethostname())[2] if not ip.startswith(("127.", "169.254."))}:
+        prefix = local.rsplit(".", 1)[0]
+        for last in range(1, 255):
+            target = f"{prefix}.{last}"
+            if target != local:
+                sock.sendto(b"SGL1?", (target, DISCOVERY_PORT))
     found, end = [], time.time() + timeout
     while time.time() < end:
         try:
@@ -138,7 +145,8 @@ def discover(timeout=1.5):
         device = data[9:9 + n].decode()
         m = struct.unpack(">H", data[9 + n:11 + n])[0]
         source = data[11 + n:11 + n + m].decode()
-        found.append((addr[0], port, device, source))
+        if (addr[0], port, device, source) not in found:  # responde a la difusión y a la pregunta directa
+            found.append((addr[0], port, device, source))
     return found
 
 

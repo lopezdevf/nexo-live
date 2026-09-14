@@ -67,30 +67,41 @@ std::wstring Streamer::LastError() {
     return error_;
 }
 
-void Streamer::TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs, uint32_t& bitrateKbps, uint32_t& keyframes) {
+void Streamer::TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs, uint32_t& bitrateKbps, uint32_t& keyframes, uint64_t& encodedBytes) {
     frames = encoder_.TakeEncodedFrames();
     keyframes = encoder_.TakeKeyframes();
+    encodedBytes = encoder_.TakeEncodedBytes();
     bytes = link_.TakeSentBytes();
     latencyMs = link_.LatencyMs();
     bitrateKbps = encoder_.BitrateKbps();
 }
 
 /**
- * Una vez por segundo: si la red se atascó o el retraso sube, baja un 30 % (mínimo 2 Mbps); tras
- * 8 segundos estables sube un 15 % hasta la calidad elegida. En WiFi floja se ve algo menos nítido
- * pero sin tirones ni retraso acumulado.
+ * Una vez por segundo: si la red se atascó o el retraso sube, baja el bitrate (mínimo 2 Mbps); tras unos
+ * segundos estables lo sube hasta la calidad elegida. En WiFi floja se ve algo menos nítido pero sin tirones
+ * ni retraso acumulado. Si el codificador tiene que reiniciarse para cada cambio, los pasos son más grandes y
+ * como mucho uno cada 4 segundos.
  */
 void Streamer::AdaptBitrate() {
     uint32_t current = encoder_.BitrateKbps();
     if (current == 0 || targetKbps_ == 0) return;
     uint32_t congestion = link_.TakeCongestionEvents();
     int latency = link_.LatencyMs();
+    bool live = encoder_.SupportsLiveBitrate();
+    if (secondsSinceChange_ < 3600) secondsSinceChange_++;
     if (congestion > 0 || latency > 120) {
         stableSeconds_ = 0;
-        encoder_.SetBitrate(std::max<uint32_t>(2000, current * 7 / 10));
-    } else if (++stableSeconds_ >= 8 && current < targetKbps_) {
+        if (!live && secondsSinceChange_ < 4) return;
+        uint32_t next = std::max<uint32_t>(2000, current * (live ? 7 : 6) / 10);
+        // Reiniciar el codificador para acercarse unos pocos kbps al mínimo no compensa: se va directo al mínimo
+        if (!live && next < 2500) next = 2000;
+        if (next == current) return;
+        encoder_.SetBitrate(next);
+        secondsSinceChange_ = 0;
+    } else if (++stableSeconds_ >= (live ? 8 : 10) && current < targetKbps_) {
         stableSeconds_ = 0;
-        encoder_.SetBitrate(std::min<uint32_t>(targetKbps_, current * 115 / 100));
+        encoder_.SetBitrate(std::min<uint32_t>(targetKbps_, current * (live ? 115 : 130) / 100));
+        secondsSinceChange_ = 0;
     }
 }
 
@@ -186,6 +197,7 @@ bool Streamer::StartPipeline(const StreamSettings& settings) {
         config.forceSoftware = settings.forceSoftware;
         targetKbps_ = quality.bitrateKbps;
         stableSeconds_ = 0;
+        secondsSinceChange_ = 0;
 
         if (!encoder_.Start(device.get(), config, [this](const uint8_t* data, size_t size, bool keyframe, int64_t captureUs) {
                 link_.SendVideoFrame(data, size, keyframe, captureUs);

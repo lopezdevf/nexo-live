@@ -9,6 +9,11 @@
 #include <chrono>
 #include <set>
 
+// Ignorar el «puerto inalcanzable» de ICMP en sockets UDP (no siempre está en las cabeceras del SDK)
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+#endif
+
 namespace sirga {
 namespace {
 
@@ -48,9 +53,19 @@ std::vector<uint8_t> Header(uint8_t type, size_t payloadSize) {
     return packet;
 }
 
-/** Direcciones de difusión de cada adaptador IPv4 activo (además de 255.255.255.255). */
-std::vector<in_addr> BroadcastAddresses() {
-    std::vector<in_addr> result;
+struct DiscoveryTargets {
+    std::vector<in_addr> broadcasts;
+    std::vector<in_addr> hosts;
+};
+
+/**
+ * Adónde preguntar por los móviles: la dirección de difusión de cada adaptador IPv4 activo y, además, cada
+ * equipo de su red local. Hay routers y WiFi de 2,4 GHz que no entregan la difusión a algunos clientes (medido
+ * con una Galaxy Tab: no respondía a la difusión y sí a la pregunta directa), así que se pregunta también uno
+ * a uno. En redes grandes solo se recorre el /24 del PC.
+ */
+DiscoveryTargets LocalDiscoveryTargets() {
+    DiscoveryTargets result;
     ULONG size = 16 * 1024;
     std::vector<uint8_t> buffer(size);
     auto addresses = reinterpret_cast<IP_ADAPTER_ADDRESSES*>(buffer.data());
@@ -73,7 +88,17 @@ std::vector<in_addr> BroadcastAddresses() {
             uint32_t mask = prefix == 0 ? 0 : 0xFFFFFFFFu << (32 - prefix);
             in_addr broadcast{};
             broadcast.s_addr = htonl(host | ~mask);
-            result.push_back(broadcast);
+            result.broadcasts.push_back(broadcast);
+            if ((host >> 16) == 0xA9FE) continue;  // 169.254.x.x: sin DHCP, no hay móviles ahí
+            uint32_t sweepMask = prefix >= 24 ? mask : 0xFFFFFF00u;
+            uint32_t network = host & sweepMask;
+            uint32_t last = network | ~sweepMask;
+            for (uint32_t candidate = network + 1; candidate < last && result.hosts.size() < 1024; candidate++) {
+                if (candidate == host) continue;
+                in_addr to{};
+                to.s_addr = htonl(candidate);
+                result.hosts.push_back(to);
+            }
         }
     }
     return result;
@@ -87,15 +112,21 @@ std::vector<PhoneInfo> DiscoverPhones(int timeoutMs) {
     if (s == INVALID_SOCKET) return phones;
     BOOL on = TRUE;
     setsockopt(s, SOL_SOCKET, SO_BROADCAST, reinterpret_cast<const char*>(&on), sizeof(on));
+    // Al preguntar a equipos sin la app, Windows convierte el «puerto inalcanzable» en un error de lectura
+    BOOL reportReset = FALSE;
+    DWORD ignored = 0;
+    WSAIoctl(s, SIO_UDP_CONNRESET, &reportReset, sizeof(reportReset), nullptr, 0, &ignored, nullptr, nullptr);
     sockaddr_in local{};
     local.sin_family = AF_INET;
     bind(s, reinterpret_cast<sockaddr*>(&local), sizeof(local));
 
     static const char query[] = {'S', 'G', 'L', '1', '?'};
-    std::vector<in_addr> targets = BroadcastAddresses();
+    DiscoveryTargets discovery = LocalDiscoveryTargets();
+    std::vector<in_addr> targets = discovery.broadcasts;
     in_addr everyone{};
     everyone.s_addr = INADDR_BROADCAST;
     targets.push_back(everyone);
+    targets.insert(targets.end(), discovery.hosts.begin(), discovery.hosts.end());
     for (const auto& target : targets) {
         sockaddr_in to{};
         to.sin_family = AF_INET;

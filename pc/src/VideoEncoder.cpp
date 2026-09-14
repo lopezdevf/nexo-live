@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Sirga Studio contributors
 #include "VideoEncoder.h"
 
+#include <chrono>
+
 #include <codecapi.h>
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
@@ -359,8 +361,10 @@ void VideoEncoder::SetCodecValues(IMFTransform* transform) {
 }
 
 void VideoEncoder::SubmitFrame(ID3D11Texture2D* frame, int64_t captureUs) {
+    // Mientras se reinicia el codificador se saltan capturas: su estado está a medio crear
+    if (restarting_) return;
     std::lock_guard lock(mutex_);
-    if (!running_ || !transform_) return;
+    if (restarting_ || !running_ || !transform_) return;
     D3D11_TEXTURE2D_DESC desc{};
     frame->GetDesc(&desc);
     if ((desc.Width != inWidth_ || desc.Height != inHeight_) && !CreateConverter(desc.Width, desc.Height)) return;
@@ -378,16 +382,48 @@ void VideoEncoder::SubmitFrame(ID3D11Texture2D* frame, int64_t captureUs) {
 }
 
 void VideoEncoder::SetBitrate(uint32_t kbps) {
-    std::lock_guard lock(mutex_);
-    if (!running_ || !transform_ || kbps == currentKbps_) return;
-    winrt::com_ptr<ICodecAPI> codec;
-    if (FAILED(transform_->QueryInterface(__uuidof(ICodecAPI), codec.put_void()))) return;
-    SetUInt(codec.get(), CODECAPI_AVEncCommonMeanBitRate, kbps * 1000);
-    currentKbps_ = kbps;
-    Log(L"Bitrate: %u kbps", kbps);
+    {
+        std::lock_guard lock(mutex_);
+        if (!running_ || !transform_ || kbps == currentKbps_) return;
+        if (liveBitrate_) {
+            winrt::com_ptr<ICodecAPI> codec;
+            if (SUCCEEDED(transform_->QueryInterface(__uuidof(ICodecAPI), codec.put_void())) &&
+                codec->IsModifiable(&CODECAPI_AVEncCommonMeanBitRate) == S_OK) {
+                VARIANT v;
+                VariantInit(&v);
+                v.vt = VT_UI4;
+                v.ulVal = kbps * 1000;
+                if (codec->SetValue(&CODECAPI_AVEncCommonMeanBitRate, &v) == S_OK) {
+                    currentKbps_ = kbps;
+                    Log(L"Bitrate: %u kbps", kbps);
+                    return;
+                }
+            }
+            // Medido con Intel Quick Sync: IsModifiable y SetValue devuelven S_FALSE durante la emisión y sigue a 8 Mbps
+            liveBitrate_ = false;
+            Log(L"%s no admite cambiar el bitrate en marcha: cada ajuste reinicia el codificador", name_.c_str());
+        }
+    }
+    Restart(kbps);
+}
+
+void VideoEncoder::Restart(uint32_t kbps) {
+    auto begin = std::chrono::steady_clock::now();
+    restarting_ = true;
+    winrt::com_ptr<ID3D11Device> device = device_;
+    Config config = config_;
+    Config previous = config_;
+    PacketCallback onPacket = onPacket_;
+    config.bitrateKbps = kbps;
+    bool ok = device && Start(device.get(), config, onPacket);
+    if (!ok && device) ok = Start(device.get(), previous, onPacket);
+    restarting_ = false;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin).count();
+    Log(L"Codificador reiniciado a %u kbps en %lld ms%s", currentKbps_.load(), static_cast<long long>(ms), ok ? L"" : L" (no se pudo)");
 }
 
 void VideoEncoder::RequestKeyframe() {
+    if (restarting_) return;  // el codificador nuevo empieza siempre con un fotograma clave
     // Con la red atascada llegan peticiones seguidas (del móvil y del descarte de la cola). Cada fotograma clave
     // pesa varias veces más que uno normal: atenderlas todas vuelve a llenar la red. Como mucho una por segundo;
     // mientras tanto el móvil espera a esa o a la siguiente del GOP (cada 2 s).
@@ -603,6 +639,7 @@ void VideoEncoder::Deliver(IMFSample* sample) {
     }
     encodedFrames_++;
     if (keyframe) keyframes_++;
+    encodedBytes_ += length;
     buffer->Unlock();
 }
 

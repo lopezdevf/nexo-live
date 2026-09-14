@@ -61,7 +61,7 @@ public:
     std::wstring EncoderName();
     std::wstring LastError();
     /** fps codificados y kbps enviados desde la última llamada. */
-    void TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs, uint32_t& bitrateKbps, uint32_t& keyframes);
+    void TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs, uint32_t& bitrateKbps, uint32_t& keyframes, uint64_t& encodedBytes);
 
     /** Se llama desde otros hilos cada vez que cambia el estado. */
     std::function<void()> onStateChanged;
@@ -83,6 +83,7 @@ private:
     std::wstring encoderName_;
     uint32_t targetKbps_ = 0;
     int stableSeconds_ = 0;
+    int secondsSinceChange_ = 0;
     std::wstring error_;
 
     LinkSession link_;

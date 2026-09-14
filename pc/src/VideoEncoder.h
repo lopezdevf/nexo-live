@@ -48,8 +48,13 @@ public:
     void SubmitFrame(ID3D11Texture2D* frame, int64_t captureUs);
     /** Codifica el siguiente fotograma como clave; si la pantalla está quieta, repite el último. */
     void RequestKeyframe();
-    /** Cambia el bitrate sin reiniciar el codificador (bitrate adaptativo). */
+    /**
+     * Cambia el bitrate (bitrate adaptativo). Si el codificador no lo admite en marcha, lo reinicia con el valor
+     * nuevo: eso cuesta un fotograma clave y unas decenas de milisegundos sin vídeo.
+     */
     void SetBitrate(uint32_t kbps);
+    /** false si cada cambio de bitrate reinicia el codificador: conviene cambiarlo menos a menudo. */
+    bool SupportsLiveBitrate() const { return liveBitrate_; }
     uint32_t BitrateKbps() const { return currentKbps_; }
 
     const std::wstring& Name() const { return name_; }
@@ -57,6 +62,8 @@ public:
     uint32_t TakeEncodedFrames() { return encodedFrames_.exchange(0); }
     /** Fotogramas clave emitidos (los del GOP y los pedidos) desde la última llamada. */
     uint32_t TakeKeyframes() { return keyframes_.exchange(0); }
+    /** Bytes que ha producido el codificador (sin contar lo que tarde la red en enviarlos). */
+    uint64_t TakeEncodedBytes() { return encodedBytes_.exchange(0); }
 
 private:
     bool CreateConverter(uint32_t inWidth, uint32_t inHeight);
@@ -65,6 +72,7 @@ private:
     bool ConfigureTypes(IMFTransform* transform);
     void SetCodecValues(IMFTransform* transform);
     void EventLoop();
+    void Restart(uint32_t kbps);
     void FeedPendingLocked();
     void DrainOutput();
     void SoftwareEncode(IMFSample* sample);
@@ -112,8 +120,11 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<uint32_t> encodedFrames_{0};
     std::atomic<uint32_t> keyframes_{0};
+    std::atomic<uint64_t> encodedBytes_{0};
     std::atomic<int64_t> lastKeyframeRequestUs_{0};
     std::atomic<uint32_t> currentKbps_{0};
+    std::atomic<bool> liveBitrate_{true};
+    std::atomic<bool> restarting_{false};
     std::thread eventThread_;
 };
 
