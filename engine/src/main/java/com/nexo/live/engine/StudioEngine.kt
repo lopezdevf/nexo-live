@@ -71,7 +71,6 @@ interface StudioEngineHost {
  * Orquesta el estudio: compositor, audio, codificadores, destinos, grabación y protección térmica.
  * Los codificadores solo existen mientras se emite o se graba.
  */
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class StudioEngine(
     context: Context,
     val studio: StudioController,

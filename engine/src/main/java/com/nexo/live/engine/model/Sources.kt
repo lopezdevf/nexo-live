@@ -44,13 +44,14 @@ sealed interface Source {
     }
 
     /**
-     * Vídeo y audio del PC sin capturadora: OBS o ffmpeg envían MPEG-TS por TCP al móvil,
-     * que escucha en [port] (WiFi, zona WiFi del móvil o anclaje USB).
+     * Pantalla y sonido del PC sin capturadora: Nexo Live PC los envía al móvil, que escucha en
+     * [port] (WiFi, zona WiFi del móvil o anclaje USB). Solo acepta al PC que conoce [code].
      */
     data class PcInput(
         override val id: String,
         override val name: String,
         val port: Int = 9000,
+        val code: String = newPairingCode(),
     ) : Source {
         override val hasVideo = true
         override val hasAudio = true
@@ -157,3 +158,6 @@ fun Source.renamed(name: String): Source = when (this) {
     is Source.Microphone -> copy(name = name)
     is Source.InternalAudio -> copy(name = name)
 }
+
+/** Código de 4 cifras que el PC debe conocer para enviar su pantalla a una fuente. */
+fun newPairingCode(): String = (java.security.SecureRandom().nextInt(9000) + 1000).toString()

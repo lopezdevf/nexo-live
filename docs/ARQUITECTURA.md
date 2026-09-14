@@ -68,6 +68,34 @@ en pantalla cambia lo que sale al aire sin capas intermedias.
 - **Reloj de audio propio**: el mezclador saca un bloque AAC (1024 muestras) exactamente cada 21,3 ms
   y cada fuente llena su búfer circular; si una fuente se retrasa suena silencio en vez de desincronizar.
 
+## Enlace con el PC (Nexo Link)
+
+La fuente «PC» recibe la pantalla y el sonido de **Nexo Live PC** (`pc/`, C++ con el SDK de Windows) por
+un protocolo propio sobre TCP, pensado para el menor retraso:
+
+```mermaid
+flowchart LR
+    WGC[Windows.Graphics.Capture] --> VP[Conversión BGRA→NV12 en la GPU]
+    VP --> MFT[H.264 por hardware<br/>Media Foundation, baja latencia]
+    WASAPI[WASAPI loopback<br/>48 kHz estéreo] --> TCP
+    MFT --> TCP[Nexo Link por TCP]
+    TCP --> DEC[MediaCodec<br/>sin búfer de espera]
+    DEC --> COMP[Textura del compositor]
+    TCP --> MIX[Canal del mezclador]
+```
+
+- **Descubrimiento**: el PC envía `NXL1?` por difusión UDP (puerto 9750) y cada fuente PC activa responde
+  con su puerto y el nombre del móvil. `PcLinkDiscovery` pide un `MulticastLock` mientras escucha.
+- **Emparejamiento**: cada fuente tiene un código de 4 cifras; sin él el móvil rechaza la conexión.
+- **Retraso**: codificador en modo de baja latencia sin fotogramas B; el PC descarta vídeo atrasado y pide
+  un fotograma clave si la red no da abasto; el móvil decodifica al llegar (`KEY_LOW_LATENCY`) y, si hay
+  varios fotogramas listos, solo muestra el último.
+- **Medida honesta**: el móvil devuelve la marca de captura de uno de cada diez fotogramas mostrados y el
+  PC calcula la media por segundo (incluye la vuelta por la red). `ClockSync` da una estimación con
+  relojes sincronizados mientras llega la primera medida.
+- **Sin cortes por la interfaz**: `PcLinkHub` mantiene el receptor 60 s después de que nadie lo use
+  (propiedades abiertas, cambio de escena); mientras tanto no decodifica.
+
 ## Protección térmica
 
 `ThermalMonitor` combina el aviso del sistema (`PowerManager`), el margen previsto
@@ -136,5 +164,5 @@ añadido posterior. Exige registrar una app de desarrollador en cada plataforma 
 5. **Audio y dispositivos** ✅ — captura por dispositivo, audio interno, mezclador, vúmetros y monitorización.
 6. **Térmica, ajustes y guardado** ✅ — protección térmica real, ajustes completos y escenas persistentes.
 7. **Validación en dispositivos** — probado en un Galaxy S25 Ultra (cámaras, grabación, Twitch 1080p60, fuente PC con
-   OBS por WiFi); faltan más fabricantes, cámaras UVC y capturadoras.
+   Nexo Live PC por WiFi); faltan más fabricantes, cámaras UVC y capturadoras.
 8. **Extras** — inicio de sesión OAuth por plataforma, chroma key/LUT, overlay de chat y alertas.

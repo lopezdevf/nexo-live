@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.AlertDialog
@@ -40,7 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.nexo.live.engine.devices.AudioDeviceEntry
@@ -56,7 +59,9 @@ import com.nexo.live.engine.model.Source
 import com.nexo.live.engine.model.TextAlignment
 import com.nexo.live.engine.model.Transform
 import com.nexo.live.engine.model.kind
+import com.nexo.live.engine.model.newPairingCode
 import com.nexo.live.engine.pclink.PcLinkAddresses
+import com.nexo.live.engine.pclink.PcLinkStatus
 import com.nexo.live.ui.destinations.Callout
 import com.nexo.live.ui.destinations.ChoiceRow
 import com.nexo.live.ui.destinations.NexoField
@@ -75,6 +80,7 @@ class SourcePropertiesModel(
     val inputs: List<AudioDeviceEntry>,
     val screenCaptureActive: Boolean,
     val error: String?,
+    val pcLink: PcLinkStatus? = null,
 )
 
 @Composable
@@ -108,7 +114,7 @@ fun SourcePropertiesDialog(
                 when (source) {
                     is Source.Camera -> CameraSection(source, model.cameras, onUpdate)
                     is Source.UsbCamera -> UsbCameraSection(source, model.usbCameras, onUpdate)
-                    is Source.PcInput -> PcInputSection(source, onUpdate)
+                    is Source.PcInput -> PcInputSection(source, model.pcLink, onUpdate)
                     is Source.Screen -> ScreenSection(model.screenCaptureActive, onRequestScreenCapture)
                     is Source.Text -> TextSection(source, onUpdate)
                     is Source.SolidColor -> {
@@ -186,46 +192,74 @@ private fun UsbCameraSection(source: Source.UsbCamera, devices: List<UsbCameraEn
 }
 
 @Composable
-private fun PcInputSection(source: Source.PcInput, onUpdate: (Source) -> Unit) {
+private fun PcInputSection(source: Source.PcInput, status: PcLinkStatus?, onUpdate: (Source) -> Unit) {
     val addresses = remember { PcLinkAddresses.localAddresses() }
+    val uriHandler = LocalUriHandler.current
     SectionLabel("CONEXIÓN CON EL PC")
     Text(
-        "Juega en el PC y emite desde el móvil sin capturadora. OBS envía la pantalla y el sonido del PC al móvil por WiFi o por cable USB.",
+        "Juega en el PC y emite desde el móvil, sin capturadora ni OBS. Nexo Live PC envía la pantalla y el sonido del ordenador a esta fuente.",
         color = Nexo.colors.textMid,
     )
-    SectionLabel("PUERTO")
-    Chips(listOf(9000, 9001, 9002, 9003), source.port, { "$it" }) { onUpdate(source.copy(port = it)) }
+    when (status) {
+        is PcLinkStatus.Connected -> Callout(
+            buildString {
+                append("Conectado a «${status.pcName}»")
+                if (status.width > 0) append(" · ${status.width}×${status.height}")
+                status.latencyMs?.let { append(" · retraso $it ms") }
+            },
+            Nexo.colors.meterLow,
+            Icons.Outlined.CheckCircle,
+        )
+        is PcLinkStatus.Error -> Callout(status.message, Nexo.colors.record)
+        is PcLinkStatus.Waiting -> status.notice?.let { Callout(it, Nexo.colors.record) }
+        null -> Unit
+    }
 
-    SectionLabel("DIRECCIÓN PARA OBS")
+    SectionLabel("CÓDIGO PARA EL PC")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            source.code.toCharArray().joinToString(" "),
+            style = Nexo.numeric.copy(fontSize = 34.sp),
+            color = Nexo.colors.volt,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = { onUpdate(source.copy(code = newPairingCode())) }) { Text("Cambiar", color = Nexo.colors.textMid) }
+    }
+    Text("Nexo Live PC lo pide la primera vez. Cámbialo si alguien más lo conoce.", style = Nexo.numeric, color = Nexo.colors.textLow)
+
+    SectionLabel("EN EL PC (UNA SOLA VEZ)")
+    listOf(
+        "1. Descarga Nexo Live PC para Windows desde la página del proyecto.",
+        "2. Ábrelo: este móvil aparece solo en la lista si está en la misma red.",
+        "3. Elige la pantalla, escribe el código y pulsa «Conectar».",
+    ).forEach { Text(it, color = Nexo.colors.textHigh) }
+    PrimaryAction("DESCARGAR NEXO LIVE PC") { uriHandler.openUri(PC_DOWNLOAD_URL) }
+
+    SectionLabel("DIRECCIÓN MANUAL")
     if (addresses.isEmpty()) {
         Callout("El móvil no tiene red. Conéctalo a la misma WiFi que el PC o activa el anclaje USB.", Nexo.colors.record)
     }
     addresses.forEach { address ->
         Column(Modifier.fillMaxWidth().background(Nexo.colors.panel, RoundedCornerShape(Nexo.metrics.radiusSmall)).padding(12.dp)) {
             Text(address.label, style = Nexo.numeric, color = Nexo.colors.textLow)
-            Text("tcp://${address.ip}:${source.port}", color = Nexo.colors.volt)
+            Text("${address.ip}:${source.port}", color = Nexo.colors.volt)
         }
     }
-
-    SectionLabel("CONFIGURAR OBS EN EL PC (UNA SOLA VEZ)")
-    listOf(
-        "1. Ajustes → Salida → Modo de salida: Avanzado.",
-        "2. Pestaña Grabación → Tipo: Salida personalizada (FFmpeg).",
-        "3. Tipo de salida FFmpeg: Enviar a URL. URL: la dirección de arriba.",
-        "4. Formato del contenedor: mpegts. Codificador de vídeo: el de tu gráfica (NVENC, AMF o QSV) H.264, 8000–12000 kbps, fotograma clave cada 1 s.",
-        "5. Codificador de audio: AAC, 160 kbps. Pulsa Aceptar.",
-        "6. Con esta fuente añadida en Nexo, pulsa «Iniciar grabación» en OBS.",
-    ).forEach { Text(it, color = Nexo.colors.textHigh) }
-    Callout(
-        "Por cable: activa en el móvil Ajustes → Conexiones → Zona WiFi y anclaje → Anclaje USB y usa la dirección «Cable USB». " +
-            "Es la opción con menos retardo y sin cortes.",
-        Nexo.colors.textMid,
-    )
     Text(
-        "La grabación de OBS no guarda nada en el PC: solo envía la señal al móvil. Si se corta, vuelve a pulsar «Iniciar grabación».",
+        "Solo hace falta si el PC no encuentra el móvil (por ejemplo, en redes que bloquean la búsqueda).",
         style = Nexo.numeric, color = Nexo.colors.textLow,
     )
+    Callout(
+        "Menos retraso: conecta el móvil al PC por cable y activa Ajustes → Conexiones → Zona WiFi y anclaje → Anclaje USB. " +
+            "Por WiFi, mejor con el PC conectado al router por cable.",
+        Nexo.colors.textMid,
+    )
+
+    SectionLabel("PUERTO")
+    Chips(listOf(9000, 9001, 9002, 9003), source.port, { "$it" }) { onUpdate(source.copy(port = it)) }
 }
+
+private const val PC_DOWNLOAD_URL = "https://github.com/lopezdevf/nexo-live/releases/latest"
 
 @Composable
 private fun OrientationControls(rotation: Int, mirror: Boolean, onRotation: (Int) -> Unit, onMirror: (Boolean) -> Unit) {

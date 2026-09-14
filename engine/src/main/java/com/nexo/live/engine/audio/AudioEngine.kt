@@ -39,7 +39,6 @@ import java.util.concurrent.locks.LockSupport
  * Captura cada fuente de audio en su hilo, las mezcla en bloques de 1024 muestras (un fotograma AAC)
  * con el reloj del sistema y reparte la mezcla al codificador y a los audífonos.
  */
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AudioEngine(
     context: Context,
     private val studio: StudioController,

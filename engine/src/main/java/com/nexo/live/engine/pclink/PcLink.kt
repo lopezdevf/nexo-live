@@ -5,48 +5,42 @@ package com.nexo.live.engine.pclink
 
 import android.content.Context
 import android.graphics.SurfaceTexture
-import android.net.Uri
-import android.os.Handler
-import android.os.HandlerThread
+import android.net.wifi.WifiManager
+import android.os.Build
+import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.Surface
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.PlaybackParameters
-import androidx.media3.common.Player
-import androidx.media3.common.VideoSize
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.BaseDataSource
-import androidx.media3.datasource.DataSpec
-import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.audio.AudioSink
-import androidx.media3.exoplayer.audio.DefaultAudioSink
-import androidx.media3.exoplayer.audio.TeeAudioProcessor
-import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import androidx.media3.extractor.ExtractorsFactory
-import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
-import androidx.media3.extractor.ts.TsExtractor
 import com.nexo.live.engine.capture.CaptureFormat
 import com.nexo.live.engine.capture.CaptureListener
 import com.nexo.live.engine.capture.CaptureStatus
 import com.nexo.live.engine.capture.SurfaceCapture
 import com.nexo.live.engine.model.Source
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.io.BufferedInputStream
-import java.io.InputStream
+import java.io.BufferedOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.IOException
+import java.net.DatagramPacket
+import java.net.DatagramSocket
 import java.net.Inet4Address
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.CopyOnWriteArraySet
 
 sealed interface PcLinkStatus {
-    data class Waiting(val port: Int) : PcLinkStatus
-    data class Connected(val width: Int, val height: Int) : PcLinkStatus
+    /** Nadie conectado. [notice] explica el último intento fallido (p. ej. código incorrecto). */
+    data class Waiting(val notice: String? = null) : PcLinkStatus
+    data class Connected(val pcName: String, val width: Int, val height: Int, val latencyMs: Long?) : PcLinkStatus
     data class Error(val message: String) : PcLinkStatus
 }
 
@@ -54,27 +48,24 @@ sealed interface PcLinkStatus {
 data class LinkAddress(val label: String, val ip: String)
 
 /**
- * Recibe el vídeo y el audio del PC sin capturadora: OBS (o ffmpeg) envía MPEG-TS por TCP al
- * móvil, que escucha en [port]. Funciona por WiFi, por la zona WiFi del móvil o por anclaje USB.
- *
- * Media3 decodifica por hardware directamente sobre la textura del compositor, y el audio se
- * desvía al mezclador de Nexo (el reproductor está en silencio).
+ * Recibe la pantalla y el sonido del PC desde Nexo Live PC, sin OBS ni capturadora. Escucha en
+ * [port] por WiFi, por la zona WiFi del móvil o por anclaje USB, y solo acepta al PC que conoce
+ * el [code] de la fuente.
  */
-@UnstableApi
-class PcLinkReceiver(context: Context, val port: Int) {
-
+class PcLinkReceiver(
+    context: Context,
+    val port: Int,
+    val code: String,
+    private val sourceName: String,
+    private val onStatus: (PcLinkStatus) -> Unit,
+) {
     private val appContext = context.applicationContext
-    private val thread = HandlerThread("NexoPcLink-$port").apply { start() }
-    private val handler = Handler(thread.looper)
-
     @Volatile private var server: ServerSocket? = null
-    /** Conexiones abiertas: al reiniciar se cierran, o un hilo de carga se quedaría bloqueado leyendo. */
-    private val sockets = java.util.concurrent.CopyOnWriteArraySet<Socket>()
-    private var player: ExoPlayer? = null
-    private var surface: Surface? = null
+    @Volatile private var session: Session? = null
     @Volatile private var released = false
+    private var acceptThread: Thread? = null
 
-    @Volatile var status: PcLinkStatus = PcLinkStatus.Waiting(port)
+    @Volatile var status: PcLinkStatus = PcLinkStatus.Waiting()
         private set
 
     /** Estado y formato hacia la fuente de vídeo. */
@@ -84,200 +75,222 @@ class PcLinkReceiver(context: Context, val port: Int) {
     @Volatile var audioListener: ((ShortArray) -> Unit)? = null
     @Volatile var targetSampleRate = 48_000
 
-    fun start() = handler.post {
-        if (released) return@post
-        try {
-            server = ServerSocket().apply {
-                reuseAddress = true
-                bind(InetSocketAddress(port))
-            }
-        } catch (e: Exception) {
-            publish(PcLinkStatus.Error("El puerto $port está ocupado. Elige otro en las propiedades."))
-            return@post
-        }
-        createPlayer()
+    private val clock = ClockSync()
+    private var videoWidth = 0
+    private var videoHeight = 0
+    @Volatile private var latencyMs: Long? = null
+    /** Retraso medido por el PC: si llega, manda sobre la estimación con relojes sincronizados. */
+    @Volatile private var reportedLatencyMs: Long? = null
+    private var lastLatencyPublish = 0L
+    private var renderedFrames = 0L
+
+    private val decoder = PcVideoDecoder(
+        onSize = { w, h ->
+            videoWidth = w
+            videoHeight = h
+            videoListener?.onFormat(CaptureFormat(w, h))
+        },
+        onRendered = { captureUs -> onFrameRendered(captureUs) },
+    )
+
+    val deviceName: String by lazy {
+        runCatching { Settings.Global.getString(appContext.contentResolver, Settings.Global.DEVICE_NAME) }.getOrNull()
+            ?.takeIf { it.isNotBlank() } ?: Build.MODEL
     }
 
-    fun setVideoSurface(newSurface: Surface?) = handler.post {
-        surface = newSurface
-        player?.setVideoSurface(newSurface)
+    val discoveryName: String get() = sourceName
+
+    fun start() {
+        acceptThread = Thread({ acceptLoop() }, "NexoPcLink-$port").apply { start() }
+    }
+
+    fun setVideoSurface(surface: Surface?) {
+        decoder.setSurface(surface)
+        if (surface != null) session?.requestKeyframe()
     }
 
     fun release() {
         released = true
-        runCatching { server?.close() } // desbloquea la espera de conexión
-        closeSockets()
-        handler.post {
-            player?.release()
-            player = null
-            thread.quitSafely()
-        }
+        runCatching { server?.close() }
+        session?.close()
+        session = null
+        acceptThread?.join(500)
+        decoder.release()
     }
 
-    private fun createPlayer() {
-        val renderers = object : DefaultRenderersFactory(appContext) {
-            override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): AudioSink =
-                DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(TeeAudioProcessor(audioTap)))
-                    .build()
-        }
-        val loadControl = DefaultLoadControl.Builder()
-            // Colchón mínimo: es un directo, la latencia importa más que absorber cortes largos
-            .setBufferDurationsMs(250, 1_500, 100, 250)
-            .setPrioritizeTimeOverSizeThresholds(true)
-            .build()
-        val extractors = ExtractorsFactory {
-            arrayOf(TsExtractor(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS))
-        }
-        val source = ProgressiveMediaSource.Factory({ SocketDataSource() }, extractors)
-            .createMediaSource(MediaItem.fromUri(Uri.parse("tcp://0.0.0.0:$port")))
-
-        player = ExoPlayer.Builder(appContext, renderers)
-            .setLooper(thread.looper)
-            .setLoadControl(loadControl)
-            .build()
-            .apply {
-                volume = 0f // se oye a través del mezclador, no por el altavoz
-                setVideoSurface(surface)
-                addListener(playerListener)
-                setMediaSource(source)
-                prepare()
-                playWhenReady = true
+    private fun acceptLoop() {
+        val socket = try {
+            ServerSocket().apply {
+                reuseAddress = true
+                bind(InetSocketAddress(port))
             }
-        handler.postDelayed(latencyGuard, 1_000)
-    }
-
-    /** Cuando el PC se desconecta o hay un error, se vuelve a esperar otra conexión. */
-    private fun restart(reason: String?) {
-        if (released) return
-        player?.let {
-            it.removeListener(playerListener)
-            it.release()
+        } catch (e: IOException) {
+            publish(PcLinkStatus.Error("El puerto $port está ocupado. Elige otro en las propiedades."))
+            return
         }
-        player = null
-        closeSockets()
-        handler.removeCallbacks(latencyGuard)
-        if (reason != null) Log.i(TAG, "Reiniciando enlace con el PC: $reason")
-        publish(PcLinkStatus.Waiting(port))
-        handler.postDelayed({ if (!released) createPlayer() }, 500)
-    }
-
-    private fun closeSockets() {
-        sockets.forEach { runCatching { it.close() } }
-        sockets.clear()
-    }
-
-    private val playerListener = object : Player.Listener {
-        override fun onVideoSizeChanged(videoSize: VideoSize) {
-            if (videoSize.width > 0 && videoSize.height > 0) {
-                videoListener?.onFormat(CaptureFormat(videoSize.width, videoSize.height))
-                publish(PcLinkStatus.Connected(videoSize.width, videoSize.height))
+        server = socket
+        publish(PcLinkStatus.Waiting())
+        while (!released) {
+            val client = try {
+                socket.accept()
+            } catch (e: IOException) {
+                break
             }
+            // El último PC que se conecta gana: si Nexo Live PC se reinicia, no hay que esperar a que caduque la conexión vieja
+            session?.close()
+            session = Session(client).also { it.start() }
         }
-
-        override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED) restart("fin de la transmisión")
-        }
-
-        override fun onPlayerError(error: PlaybackException) = restart(error.errorCodeName)
+        runCatching { socket.close() }
     }
 
-    /**
-     * Si la red se atasca, el retraso se acumula. Se reproduce un poco más rápido hasta volver a
-     * menos de medio segundo de colchón, algo imperceptible.
-     */
-    private val latencyGuard = object : Runnable {
-        override fun run() {
-            val p = player ?: return
-            val buffered = p.totalBufferedDuration
-            val speed = when {
-                buffered > 1_000 -> 1.1f
-                buffered > 500 -> 1.03f
-                else -> 1f
-            }
-            if (p.playbackParameters.speed != speed) p.playbackParameters = PlaybackParameters(speed)
-            handler.postDelayed(this, 1_000)
+    private fun onFrameRendered(captureUs: Long) {
+        // Uno de cada diez fotogramas vuelve al PC para que mida el retraso real de punta a punta
+        if (renderedFrames++ % 10 == 0L) session?.frameShown(captureUs)
+        val estimate = clock.latencyMs(captureUs, SystemClock.elapsedRealtimeNanos() / 1000)
+        if (estimate != null) latencyMs = latencyMs?.let { (it * 7 + estimate) / 8 } ?: estimate
+        val shown = reportedLatencyMs ?: latencyMs ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastLatencyPublish >= 500) {
+            lastLatencyPublish = now
+            (status as? PcLinkStatus.Connected)?.let { publish(it.copy(width = videoWidth, height = videoHeight, latencyMs = shown)) }
         }
     }
 
     private fun publish(newStatus: PcLinkStatus) {
         status = newStatus
+        onStatus(newStatus)
         when (newStatus) {
-            is PcLinkStatus.Waiting -> videoListener?.onStatus(CaptureStatus.Waiting(PcLinkAddresses.waitingMessage(port)))
+            is PcLinkStatus.Waiting -> videoListener?.onStatus(CaptureStatus.Waiting(waitingMessage(newStatus.notice)))
             is PcLinkStatus.Connected -> videoListener?.onStatus(CaptureStatus.Running)
             is PcLinkStatus.Error -> videoListener?.onStatus(CaptureStatus.Error(newStatus.message))
         }
     }
 
-    /** Fuente de datos que espera la conexión del PC y lee su flujo MPEG-TS. */
-    private inner class SocketDataSource : BaseDataSource(true) {
-        private var socket: Socket? = null
-        private var input: InputStream? = null
-        private var opened = false
+    fun waitingMessage(notice: String? = (status as? PcLinkStatus.Waiting)?.notice): String =
+        notice ?: "Abre Nexo Live PC en el ordenador y elige este móvil · código $code"
 
-        override fun open(dataSpec: DataSpec): Long {
-            transferInitializing(dataSpec)
-            val s = (server ?: throw java.io.IOException("Servidor cerrado")).accept()
-            s.tcpNoDelay = true
-            s.receiveBufferSize = 1 shl 20
-            sockets += s
-            socket = s
-            input = BufferedInputStream(s.getInputStream(), 1 shl 16)
-            opened = true
-            transferStarted(dataSpec)
-            return C.LENGTH_UNSET.toLong()
-        }
-
-        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-            if (length == 0) return 0
-            val n = input?.read(buffer, offset, length) ?: return C.RESULT_END_OF_INPUT
-            if (n < 0) return C.RESULT_END_OF_INPUT
-            bytesTransferred(n)
-            return n
-        }
-
-        override fun getUri(): Uri = Uri.parse("tcp://0.0.0.0:$port")
-
-        override fun close() {
-            socket?.let { sockets -= it }
-            runCatching { socket?.close() }
-            socket = null
-            input = null
-            if (opened) {
-                opened = false
-                transferEnded()
-            }
-        }
-    }
-
-    /** Recibe el PCM decodificado antes de que llegue al altavoz (en silencio). */
-    private val audioTap = object : TeeAudioProcessor.AudioBufferSink {
-        private var sampleRate = 48_000
-        private var channels = 2
-        private var encoding = C.ENCODING_PCM_16BIT
+    private inner class Session(private val socket: Socket) : Thread("NexoPcSession-$port") {
+        @Volatile private var closed = false
+        private lateinit var output: DataOutputStream
+        private var lastKeyframeRequest = 0L
         private val resampler = LinearResampler()
 
-        override fun flush(sampleRateHz: Int, channelCount: Int, encoding: Int) {
-            sampleRate = sampleRateHz
-            channels = channelCount
-            this.encoding = encoding
-            resampler.reset()
+        override fun run() {
+            try {
+                socket.tcpNoDelay = true
+                socket.receiveBufferSize = 1 shl 20
+                // Sin paquetes en este tiempo, el PC se ha ido (manda la hora cada segundo aunque la pantalla no cambie)
+                socket.soTimeout = 5_000
+                val input = DataInputStream(BufferedInputStream(socket.getInputStream(), 1 shl 16))
+                output = DataOutputStream(BufferedOutputStream(socket.getOutputStream(), 256))
+
+                val hello = NexoLink.readHello(input) ?: return
+                if (hello.code != code.toIntOrNull()) {
+                    synchronized(this) { NexoLink.writeReply(output, NexoLink.RESULT_WRONG_CODE, deviceName) }
+                    if (session === this) publish(PcLinkStatus.Waiting("«${hello.pcName}» intentó conectar con un código incorrecto · código $code"))
+                    return
+                }
+                synchronized(this) { NexoLink.writeReply(output, NexoLink.RESULT_OK, deviceName) }
+                clock.reset()
+                latencyMs = null
+                reportedLatencyMs = null
+                Log.i(TAG, "PC conectado: ${hello.pcName}")
+                publish(PcLinkStatus.Connected(hello.pcName, videoWidth, videoHeight, null))
+                requestKeyframe()
+                // La hora se pide cada segundo desde otro hilo: mide el retraso y mantiene viva la conexión
+                // aunque la pantalla del PC no cambie y no suene nada
+                Thread({
+                    while (!closed) {
+                        sendTimeRequest()
+                        try {
+                            sleep(1_000)
+                        } catch (e: InterruptedException) {
+                            break
+                        }
+                    }
+                }, "NexoPcClock").apply {
+                    isDaemon = true
+                    start()
+                }
+
+                while (!closed) handle(NexoLink.readPacket(input))
+            } catch (e: SocketTimeoutException) {
+                Log.i(TAG, "El PC dejó de enviar")
+            } catch (e: IOException) {
+                // Conexión cerrada por el PC o por la red
+            } finally {
+                runCatching { socket.close() }
+                if (session === this && !released) {
+                    session = null
+                    if (status is PcLinkStatus.Connected) publish(PcLinkStatus.Waiting())
+                }
+            }
         }
 
-        override fun handleBuffer(buffer: ByteBuffer) {
+        private fun handle(packet: NexoLink.Packet) {
+            val data = ByteBuffer.wrap(packet.payload)
+            when (packet.type) {
+                NexoLink.VIDEO_FORMAT -> if (packet.payload.size >= 5) {
+                    decoder.setSize(data.short.toInt() and 0xFFFF, data.short.toInt() and 0xFFFF)
+                }
+                NexoLink.VIDEO_FRAME -> if (packet.payload.size > 9) {
+                    val keyframe = data.get().toInt() and 1 == 1
+                    val captureUs = data.long
+                    val frame = packet.payload.copyOfRange(9, packet.payload.size)
+                    if (!decoder.decode(frame, keyframe, captureUs)) requestKeyframe()
+                }
+                NexoLink.AUDIO_PCM -> if (packet.payload.size > 13) {
+                    val rate = data.int
+                    val channels = data.get().toInt().coerceAtLeast(1)
+                    data.long // instante de captura: el audio se mezcla al llegar, igual que el vídeo
+                    deliverAudio(data.slice().order(ByteOrder.LITTLE_ENDIAN), rate, channels)
+                }
+                NexoLink.LATENCY_REPORT -> if (packet.payload.size >= 4) {
+                    reportedLatencyMs = (data.int.toLong() and 0xFFFFFFFFL)
+                }
+                NexoLink.TIME_REPLY -> if (packet.payload.size >= 16) {
+                    clock.add(phoneSentUs = data.long, pcUs = data.long, phoneReceivedUs = SystemClock.elapsedRealtimeNanos() / 1000)
+                }
+            }
+        }
+
+        private fun deliverAudio(pcm: ByteBuffer, rate: Int, channels: Int) {
             val listener = audioListener ?: return
-            if (encoding != C.ENCODING_PCM_16BIT || channels <= 0) return
-            val shorts = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+            val shorts = pcm.asShortBuffer()
             val frames = shorts.remaining() / channels
             if (frames == 0) return
             val stereo = ShortArray(frames * 2)
             for (f in 0 until frames) {
                 val l = shorts.get(f * channels)
-                val r = if (channels > 1) shorts.get(f * channels + 1) else l
                 stereo[f * 2] = l
-                stereo[f * 2 + 1] = r
+                stereo[f * 2 + 1] = if (channels > 1) shorts.get(f * channels + 1) else l
             }
-            listener(resampler.convert(stereo, sampleRate, targetSampleRate))
+            listener(resampler.convert(stereo, rate, targetSampleRate))
+        }
+
+        fun frameShown(captureUs: Long) = send(NexoLink.FRAME_SHOWN, NexoLink.frameShown(captureUs))
+
+        fun requestKeyframe() {
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastKeyframeRequest < 300) return
+            lastKeyframeRequest = now
+            send(NexoLink.KEYFRAME_REQUEST)
+        }
+
+        private fun sendTimeRequest() = send(NexoLink.TIME_REQUEST, NexoLink.timeRequest(SystemClock.elapsedRealtimeNanos() / 1000))
+
+        private fun send(type: Int, payload: ByteArray = ByteArray(0)) {
+            if (closed || !::output.isInitialized) return
+            try {
+                synchronized(this) { NexoLink.writePacket(output, type, payload) }
+            } catch (e: IOException) {
+                close()
+            }
+        }
+
+        fun close() {
+            closed = true
+            runCatching { socket.close() }
         }
     }
 
@@ -286,34 +299,103 @@ class PcLinkReceiver(context: Context, val port: Int) {
     }
 }
 
-/** Direcciones y textos de ayuda del enlace con el PC (sin dependencias de Media3). */
-object PcLinkAddresses {
+/**
+ * Responde a Nexo Live PC cuando busca móviles en la red: así el usuario elige el móvil de una
+ * lista en lugar de escribir direcciones IP.
+ */
+internal class PcLinkDiscovery(context: Context) {
+    private val appContext = context.applicationContext
+    private val receivers = CopyOnWriteArraySet<PcLinkReceiver>()
+    private var thread: Thread? = null
+    @Volatile private var socket: DatagramSocket? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
 
-    fun waitingMessage(port: Int): String {
-        val ips = localAddresses().joinToString(" · ") { "${it.ip}:$port" }
-        return if (ips.isEmpty()) "Esperando al PC: conecta el móvil a la misma red WiFi o activa el anclaje USB"
-        else "Esperando al PC en $ips"
+    @Synchronized
+    fun register(receiver: PcLinkReceiver) {
+        receivers += receiver
+        if (thread == null) start()
     }
+
+    @Synchronized
+    fun unregister(receiver: PcLinkReceiver) {
+        receivers -= receiver
+        if (receivers.isEmpty()) stop()
+    }
+
+    private fun start() {
+        // Algunos móviles filtran los paquetes de difusión con la pantalla apagada si no se pide este bloqueo
+        multicastLock = runCatching {
+            appContext.getSystemService(WifiManager::class.java)?.createMulticastLock("NexoPcLink")?.apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.getOrNull()
+        thread = Thread({ loop() }, "NexoPcDiscovery").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun stop() {
+        runCatching { socket?.close() }
+        socket = null
+        thread = null
+        runCatching { multicastLock?.release() }
+        multicastLock = null
+    }
+
+    private fun loop() {
+        val s = try {
+            DatagramSocket(null).apply {
+                reuseAddress = true
+                broadcast = true
+                bind(InetSocketAddress(NexoLink.DISCOVERY_PORT))
+            }
+        } catch (e: IOException) {
+            Log.w("NexoPcDiscovery", "No se pudo escuchar el descubrimiento", e)
+            return
+        }
+        socket = s
+        val buffer = ByteArray(64)
+        while (socket === s) {
+            try {
+                val packet = DatagramPacket(buffer, buffer.size)
+                s.receive(packet)
+                if (!NexoLink.isDiscoveryQuery(packet.data, packet.length)) continue
+                for (receiver in receivers) {
+                    val reply = NexoLink.discoveryReply(receiver.port, receiver.deviceName, receiver.discoveryName)
+                    s.send(DatagramPacket(reply, reply.size, packet.socketAddress))
+                }
+            } catch (e: IOException) {
+                if (socket !== s) break
+            }
+        }
+        runCatching { s.close() }
+    }
+}
+
+/** Direcciones y textos de ayuda del enlace con el PC. */
+object PcLinkAddresses {
 
     /** Direcciones IPv4 útiles: WiFi, zona WiFi del móvil y anclaje USB. */
     fun localAddresses(): List<LinkAddress> = runCatching {
-            NetworkInterface.getNetworkInterfaces().toList()
-                .filter { it.isUp && !it.isLoopback }
-                .flatMap { nif ->
-                    nif.inetAddresses.toList().filterIsInstance<Inet4Address>().map { addr ->
-                        val name = nif.name.lowercase()
-                        val label = when {
-                            name.startsWith("wlan") -> "WiFi"
-                            name.startsWith("swlan") || name.startsWith("ap") -> "Zona WiFi del móvil"
-                            name.startsWith("rndis") || name.startsWith("usb") || name.startsWith("ncm") -> "Cable USB (anclaje)"
-                            name.startsWith("eth") -> "Ethernet"
-                            else -> null
-                        }
-                        label?.let { LinkAddress(it, addr.hostAddress.orEmpty()) }
+        NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback }
+            .flatMap { nif ->
+                nif.inetAddresses.toList().filterIsInstance<Inet4Address>().map { addr ->
+                    val name = nif.name.lowercase()
+                    val label = when {
+                        name.startsWith("wlan") -> "WiFi"
+                        name.startsWith("swlan") || name.startsWith("ap") -> "Zona WiFi del móvil"
+                        name.startsWith("rndis") || name.startsWith("usb") || name.startsWith("ncm") -> "Cable USB (anclaje)"
+                        name.startsWith("eth") -> "Ethernet"
+                        else -> null
                     }
+                    label?.let { LinkAddress(it, addr.hostAddress.orEmpty()) }
                 }
-                .filterNotNull()
-        }.getOrDefault(emptyList())
+            }
+            .filterNotNull()
+    }.getOrDefault(emptyList())
 }
 
 /** Remuestreo lineal estéreo, suficiente para pasar de 44,1 kHz a 48 kHz sin artefactos audibles en voz y juegos. */
@@ -354,45 +436,78 @@ internal class LinearResampler {
 /**
  * Comparte un receptor por fuente entre el compositor (vídeo) y el mezclador (audio): el puerto
  * solo se abre una vez aunque las dos partes lo usen.
+ *
+ * Cuando nadie lo usa, el receptor sigue abierto [GRACE_MS] antes de cerrarse: abrir las
+ * propiedades, cambiar de escena o salir un momento de la app no desconecta al PC. Mientras
+ * tanto no se decodifica nada, así que no gasta batería.
  */
-@UnstableApi
 class PcLinkHub(private val context: Context) {
-    private class Entry(val receiver: PcLinkReceiver, var users: Int)
+    private class Entry(val receiver: PcLinkReceiver, var users: Int, var closeAt: Long = 0L)
 
     private val entries = HashMap<String, Entry>()
+    private val discovery = PcLinkDiscovery(context)
+    private val closer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { Thread(it, "NexoPcLinkHub").apply { isDaemon = true } }
+
+    private val _statuses = MutableStateFlow<Map<String, PcLinkStatus>>(emptyMap())
+    /** Estado del enlace de cada fuente PC activa, para mostrar conexión y retraso. */
+    val statuses: StateFlow<Map<String, PcLinkStatus>> = _statuses.asStateFlow()
 
     @Synchronized
     fun acquire(source: Source.PcInput): PcLinkReceiver {
         entries[source.id]?.let { entry ->
-            if (entry.receiver.port == source.port) {
+            if (entry.receiver.port == source.port && entry.receiver.code == source.code) {
                 entry.users++
+                entry.closeAt = 0L
                 return entry.receiver
             }
-            entry.receiver.release()
-            entries.remove(source.id)
+            close(source.id, entry.receiver)
         }
-        val receiver = PcLinkReceiver(context, source.port).also { it.start() }
+        // Una fuente borrada o con otro puerto puede seguir en su tiempo de gracia ocupando este puerto
+        entries.entries.filter { it.value.users <= 0 && it.value.receiver.port == source.port }.map { it.key to it.value.receiver }
+            .forEach { (id, receiver) -> close(id, receiver) }
+        val receiver = PcLinkReceiver(context, source.port, source.code, source.name) { status ->
+            _statuses.update { it + (source.id to status) }
+        }
+        receiver.start()
+        discovery.register(receiver)
         entries[source.id] = Entry(receiver, 1)
         return receiver
     }
 
     @Synchronized
     fun release(sourceId: String, receiver: PcLinkReceiver) {
-        val entry = entries[sourceId] ?: return
-        if (entry.receiver !== receiver) {
+        val entry = entries[sourceId]
+        if (entry == null || entry.receiver !== receiver) {
+            discovery.unregister(receiver)
             receiver.release()
             return
         }
         entry.users--
-        if (entry.users <= 0) {
-            entry.receiver.release()
-            entries.remove(sourceId)
-        }
+        if (entry.users > 0) return
+        val closeAt = SystemClock.elapsedRealtime() + GRACE_MS
+        entry.closeAt = closeAt
+        closer.schedule({ closeIfUnused(sourceId, receiver, closeAt) }, GRACE_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+
+    @Synchronized
+    private fun closeIfUnused(sourceId: String, receiver: PcLinkReceiver, closeAt: Long) {
+        val entry = entries[sourceId] ?: return
+        if (entry.receiver === receiver && entry.users <= 0 && entry.closeAt == closeAt) close(sourceId, receiver)
+    }
+
+    private fun close(sourceId: String, receiver: PcLinkReceiver) {
+        discovery.unregister(receiver)
+        receiver.release()
+        entries.remove(sourceId)
+        _statuses.update { it - sourceId }
+    }
+
+    private companion object {
+        const val GRACE_MS = 60_000L
     }
 }
 
 /** Parte de vídeo de la fuente «PC»: el decodificador escribe en la textura del compositor. */
-@UnstableApi
 class PcCapture(private val hub: PcLinkHub, private val source: Source.PcInput) : SurfaceCapture {
     private var receiver: PcLinkReceiver? = null
     private var surface: Surface? = null
@@ -403,9 +518,11 @@ class PcCapture(private val hub: PcLinkHub, private val source: Source.PcInput) 
         r.videoListener = listener
         listener.onStatus(
             when (val s = r.status) {
-                is PcLinkStatus.Connected -> CaptureStatus.Running.also { listener.onFormat(CaptureFormat(s.width, s.height)) }
+                is PcLinkStatus.Connected -> CaptureStatus.Running.also {
+                    if (s.width > 0) listener.onFormat(CaptureFormat(s.width, s.height))
+                }
                 is PcLinkStatus.Error -> CaptureStatus.Error(s.message)
-                is PcLinkStatus.Waiting -> CaptureStatus.Waiting(PcLinkAddresses.waitingMessage(source.port))
+                is PcLinkStatus.Waiting -> CaptureStatus.Waiting(r.waitingMessage(s.notice))
             }
         )
         val s = Surface(texture)

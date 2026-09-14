@@ -44,6 +44,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     val audioErrors = engine.audio.errors
     val monitorStatus = engine.audio.monitorStatus
     val sourceStatus = engine.compositor.sourceStatus
+    val pcLinkStatus = engine.pcLink.statuses
     val cameras = engine.devices.cameras
     val usbCameras = engine.devices.usbCameras
     val audioInputs = engine.devices.inputs

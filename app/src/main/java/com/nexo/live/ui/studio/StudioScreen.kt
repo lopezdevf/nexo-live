@@ -191,6 +191,7 @@ private fun SourceProperties(vm: StudioViewModel, state: StudioState, sourceId: 
     val inputs by vm.audioInputs.collectAsStateWithLifecycle()
     val sourceStatus by vm.sourceStatus.collectAsStateWithLifecycle()
     val audioErrors by vm.audioErrors.collectAsStateWithLifecycle()
+    val pcLinkStatus by vm.pcLinkStatus.collectAsStateWithLifecycle()
     val item = state.editingScene?.items?.firstOrNull { it.sourceId == sourceId && it.id == state.selectedItemId }
         ?: state.editingScene?.items?.firstOrNull { it.sourceId == sourceId }
     val error = (sourceStatus[sourceId] as? com.nexo.live.engine.capture.CaptureStatus.Error)?.message ?: audioErrors[sourceId]
@@ -205,6 +206,7 @@ private fun SourceProperties(vm: StudioViewModel, state: StudioState, sourceId: 
             inputs = inputs,
             screenCaptureActive = screenCaptureActive,
             error = error,
+            pcLink = pcLinkStatus[sourceId],
         ),
         onClose = { vm.openProperties(null) },
         onUpdate = vm::updateSource,

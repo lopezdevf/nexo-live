@@ -10,7 +10,7 @@ pensado desde cero para el móvil.
 
 > **Estado:** alfa. Todo el flujo (compositor OpenGL, captura, codificación, emisión, grabación, audio y
 > control térmico) está implementado y probado en un Galaxy S25 Ultra: cámaras trasera y frontal,
-> grabación, emisión a Twitch en 1080p60, mezclador y la fuente PC con OBS por WiFi. **Aún falta
+> grabación, emisión a Twitch en 1080p60, mezclador y la fuente PC con Nexo Live PC por WiFi. **Aún falta
 > probarlo en más móviles**; si lo pruebas, cuéntanos cómo va en *issues*.
 
 ## Características
@@ -32,8 +32,10 @@ pertenece a la plataforma elegida. También puedes *compartir* el enlace con la 
 
 ### Jugar en el PC y emitir desde el móvil
 
-Sin capturadora: OBS envía la pantalla y el sonido del PC al móvil por WiFi o por cable USB, y Nexo Live
-los mezcla con tu cámara y hace el directo. Guía paso a paso en [docs/PC.md](docs/PC.md).
+Sin capturadora ni OBS: **Nexo Live PC**, una aplicación propia para Windows de 370 KB, envía la pantalla y
+el sonido del ordenador al móvil por WiFi o por cable USB, y Nexo Live los mezcla con tu cámara y hace el
+directo. Encuentra el móvil sola en la red, se empareja con un código de 4 cifras y codifica por hardware
+en modo de baja latencia (unos 28 ms medidos por WiFi). Guía en [docs/PC.md](docs/PC.md).
 
 ### Protección contra el sobrecalentamiento
 
@@ -76,7 +78,7 @@ La arquitectura está explicada en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
 - [x] Destinos: 15 plataformas, enlaces de conexión, claves cifradas, multistream, prueba de conexión
 - [x] Compositor OpenGL: cámaras (incluidas externas), cámaras USB/capturadoras UVC, pantalla, imagen y texto
 - [x] Codificación por hardware H.264/H.265 (VBR o CBR), emisión RTMP/SRT, grabación MP4 y bitrate adaptativo
-- [x] Fuente PC: recibe OBS por WiFi o cable USB, sin capturadora
+- [x] Fuente PC y Nexo Live PC (Windows): pantalla y sonido del ordenador por WiFi o cable USB, sin capturadora
 - [x] Audio por dispositivo (integrado, cable, USB, Bluetooth), audio interno, mezclador y monitorización
 - [x] Control térmico real (estado del sistema, margen previsto y batería)
 - [x] Ajustes completos, propiedades de cada fuente y escenas guardadas entre sesiones

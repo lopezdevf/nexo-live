@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.KeyboardType
@@ -364,7 +365,7 @@ internal fun ChoiceRow(selected: Boolean, title: String, subtitle: String?, onCl
 }
 
 @Composable
-internal fun Callout(text: String, color: Color) {
+internal fun Callout(text: String, color: Color, icon: ImageVector = Icons.Outlined.WarningAmber) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -372,7 +373,7 @@ internal fun Callout(text: String, color: Color) {
             .border(Nexo.metrics.hairline, color.copy(alpha = 0.5f), RoundedCornerShape(Nexo.metrics.radiusSmall))
             .padding(12.dp),
     ) {
-        Icon(Icons.Outlined.WarningAmber, null, tint = color, modifier = Modifier.size(18.dp))
+        Icon(icon, null, tint = color, modifier = Modifier.size(18.dp))
         Text(text, color = color, modifier = Modifier.padding(start = 8.dp))
     }
 }

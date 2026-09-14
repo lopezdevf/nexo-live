@@ -21,7 +21,7 @@ val SourceKind.label: String
     get() = when (this) {
         SourceKind.Camera -> "Cámara"
         SourceKind.UsbCamera -> "Cámara USB / capturadora"
-        SourceKind.PcInput -> "PC (OBS por WiFi o USB)"
+        SourceKind.PcInput -> "PC (Nexo Live PC)"
         SourceKind.Screen -> "Pantalla"
         SourceKind.Image -> "Imagen"
         SourceKind.Text -> "Texto"
