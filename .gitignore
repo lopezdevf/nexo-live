@@ -15,3 +15,6 @@
 *.jks
 # Mapa local de graphify: contiene rutas de tu equipo
 graphify-out/
+
+# Python
+__pycache__/
