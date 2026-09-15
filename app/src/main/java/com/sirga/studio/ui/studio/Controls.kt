@@ -155,7 +155,7 @@ private fun ThermalBadge(
                     text = {
                         Column {
                             Text(option.shortLabel, color = if (option == policy) Sirga.colors.accentText else Sirga.colors.textHigh)
-                            Text(option.hint, style = Sirga.numeric, color = Sirga.colors.textLow)
+                            Text(option.hint, fontSize = 12.sp, lineHeight = 16.sp, color = Sirga.colors.textLow)
                         }
                     },
                     leadingIcon = {

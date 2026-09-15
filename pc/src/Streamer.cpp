@@ -272,6 +272,12 @@ void Streamer::Run(StreamSettings settings) {
             disconnected_ = false;
         }
         SetState(StreamState::Connecting);
+        {
+            // Antes de conectar: el móvil pide sus cámaras y micrófonos nada más saludar, mientras aquí aún se prepara la captura
+            std::lock_guard lock(mutex_);
+            wanted_.clear();
+            devicesPending_ = false;
+        }
         std::wstring device;
         ConnectResult result = link_.Connect(settings.ip, settings.port, settings.code, pcName, device);
         {
@@ -356,11 +362,6 @@ bool Streamer::StartPipeline(const StreamSettings& settings) {
         }
         link_.SendVideoFormat(config.width, config.height, config.fps);
         d3dDevice_ = device;
-        {
-            std::lock_guard lock(mutex_);
-            wanted_.clear();
-            devicesPending_ = false;
-        }
         devices_ = EnumerateDevices();
         deviceListSeconds_ = 0;
         link_.SendDeviceList(devices_);

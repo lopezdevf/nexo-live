@@ -363,6 +363,8 @@ class PcLinkReceiver(
                     _devices.value = list
                     onDevices(list)
                     refreshStreamStatuses()
+                    // El PC ya tiene la lista lista: se repite lo que se quiere por si la primera petición llegó mientras preparaba la captura
+                    sendSubscriptions()
                 }
                 SirgaLink.STREAM_VIDEO_FORMAT -> if (packet.payload.size >= 6) {
                     val stream = streamsById[data.get().toInt() and 0xFF]
