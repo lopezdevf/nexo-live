@@ -106,4 +106,32 @@ class SirgaLinkTest {
         sync.add(phoneSentUs = 2_000, pcUs = 10_000, phoneReceivedUs = 1_000)
         assertNull(sync.offsetUs)
     }
+
+    @Test
+    fun `lista de dispositivos del PC ida y vuelta, con id largos y tildes`() {
+        val devices = listOf(
+            PcDevice(PcDeviceKind.Camera, "\\\\?\\usb#vid_30c9&pid_0069&mi_00#7&1a2b3c4d&0&0000#{e5323777-f976-4f5b-9b55-b94699c46e44}\\global", "HP FHD Camera"),
+            PcDevice(PcDeviceKind.Microphone, "{0.0.1.00000000}.{8a1b}", "Micrófono (fifine Microphone)"),
+        )
+        assertEquals(devices, SirgaLink.parseDeviceList(SirgaLink.deviceList(devices)))
+    }
+
+    @Test
+    fun `los tipos de dispositivo desconocidos se ignoran`() {
+        val payload = byteArrayOf(2, 9, 0, 1, 'x'.code.toByte(), 0, 1, 'y'.code.toByte(), 1, 0, 1, 'c'.code.toByte(), 0, 1, 'C'.code.toByte())
+        assertEquals(listOf(PcDevice(PcDeviceKind.Camera, "c", "C")), SirgaLink.parseDeviceList(payload))
+    }
+
+    @Test
+    fun `la suscripción lista señal e id y descarta señales fuera de rango`() {
+        val payload = SirgaLink.subscribe(mapOf(1 to "cam", 0 to "no", 2 to "mic"))
+        val input = java.io.DataInputStream(payload.inputStream())
+        assertEquals(2, input.readUnsignedByte())
+        val read = (0 until 2).associate {
+            val stream = input.readUnsignedByte()
+            val bytes = ByteArray(input.readUnsignedShort()).also(input::readFully)
+            stream to String(bytes)
+        }
+        assertEquals(mapOf(1 to "cam", 2 to "mic"), read)
+    }
 }

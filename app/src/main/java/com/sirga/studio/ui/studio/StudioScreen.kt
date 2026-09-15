@@ -141,6 +141,21 @@ fun StudioScreen(vm: StudioViewModel, destinationsVm: DestinationsViewModel, onR
 
     propertiesFor?.let { sourceId -> SourceProperties(vm, state, sourceId, screenCaptureActive, requestScreenCapture) }
 
+    val pcPicker by vm.pcPicker.collectAsStateWithLifecycle()
+    pcPicker?.let { kind ->
+        val pcDevices by vm.pcDevices.collectAsStateWithLifecycle()
+        val pcStatuses by vm.pcLinkStatus.collectAsStateWithLifecycle()
+        PcDevicePickerDialog(
+            kind = kind,
+            pcSources = state.sources.values.filterIsInstance<Source.PcInput>(),
+            devices = pcDevices,
+            statuses = pcStatuses,
+            onPick = vm::addPcDevice,
+            onAddPcSource = { vm.closePcPicker(); vm.addSource(SourceKind.PcInput) },
+            onDismiss = vm::closePcPicker,
+        )
+    }
+
     if (settingsOpen) {
         val settings by vm.settings.collectAsStateWithLifecycle()
         val outputs by vm.audioOutputs.collectAsStateWithLifecycle()
@@ -196,6 +211,13 @@ private fun SourceProperties(vm: StudioViewModel, state: StudioState, sourceId: 
     val sourceStatus by vm.sourceStatus.collectAsStateWithLifecycle()
     val audioErrors by vm.audioErrors.collectAsStateWithLifecycle()
     val pcLinkStatus by vm.pcLinkStatus.collectAsStateWithLifecycle()
+    val pcDevices by vm.pcDevices.collectAsStateWithLifecycle()
+    // Una cámara o un micrófono del PC muestra el estado y los dispositivos de su fuente PC
+    val pcSourceId = when (source) {
+        is Source.PcCamera -> source.pcSourceId
+        is Source.PcMicrophone -> source.pcSourceId
+        else -> sourceId
+    }
     val item = state.editingScene?.items?.firstOrNull { it.sourceId == sourceId && it.id == state.selectedItemId }
         ?: state.editingScene?.items?.firstOrNull { it.sourceId == sourceId }
     val error = (sourceStatus[sourceId] as? com.sirga.studio.engine.capture.CaptureStatus.Error)?.message ?: audioErrors[sourceId]
@@ -210,7 +232,9 @@ private fun SourceProperties(vm: StudioViewModel, state: StudioState, sourceId: 
             inputs = inputs,
             screenCaptureActive = screenCaptureActive,
             error = error,
-            pcLink = pcLinkStatus[sourceId],
+            pcLink = pcLinkStatus[pcSourceId],
+            pcDevices = pcDevices[pcSourceId].orEmpty(),
+            pcSource = state.sources[pcSourceId] as? Source.PcInput,
         ),
         onClose = { vm.openProperties(null) },
         onUpdate = vm::updateSource,
@@ -219,6 +243,7 @@ private fun SourceProperties(vm: StudioViewModel, state: StudioState, sourceId: 
         onChannel = vm::setChannel,
         onDelete = { vm.deleteSource(sourceId) },
         onRequestScreenCapture = onRequestScreenCapture,
+        onAddPcDevice = { device -> vm.addPcDevice(sourceId, device) },
     )
 }
 
@@ -239,7 +264,7 @@ private fun LandscapeStudio(state: StudioState, dockTab: DockTab, destinations: 
     val vm = actions.vm
     val narrow = screenWidth < 1000.dp
     Column(Modifier.fillMaxSize()) {
-        StatusStrip(state, compact = false, onSettings = { vm.openSettings(true) })
+        StatusStrip(state, compact = false, onSettings = { vm.openSettings(true) }, thermalPolicy = vm.settings.collectAsStateWithLifecycle().value.thermal.policy, onThermalPolicy = { p -> vm.updateSettings { it.copy(thermal = it.thermal.copy(policy = p)) } })
         Row(
             Modifier.weight(1f).padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -271,7 +296,7 @@ private fun TabletStudio(state: StudioState, dockTab: DockTab, destinations: Des
     val vm = actions.vm
     val bottomHeight = (screenHeight * 0.32f).coerceIn(220.dp, 320.dp)
     Column(Modifier.fillMaxSize()) {
-        StatusStrip(state, compact = false, onSettings = { vm.openSettings(true) })
+        StatusStrip(state, compact = false, onSettings = { vm.openSettings(true) }, thermalPolicy = vm.settings.collectAsStateWithLifecycle().value.thermal.policy, onThermalPolicy = { p -> vm.updateSettings { it.copy(thermal = it.thermal.copy(policy = p)) } })
         Row(
             Modifier.weight(1f).padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -308,7 +333,7 @@ private fun PortraitStudio(state: StudioState, dockTab: DockTab, destinations: D
     // y el dock conserva una altura usable
     val short = screenHeight < 600.dp
     Column(Modifier.fillMaxSize().then(if (short) Modifier.verticalScroll(rememberScrollState()) else Modifier)) {
-        StatusStrip(state, compact = true, onSettings = { vm.openSettings(true) })
+        StatusStrip(state, compact = true, onSettings = { vm.openSettings(true) }, thermalPolicy = vm.settings.collectAsStateWithLifecycle().value.thermal.policy, onThermalPolicy = { p -> vm.updateSettings { it.copy(thermal = it.thermal.copy(policy = p)) } })
         // Un lienzo vertical en un móvil vertical sería más alto que la pantalla y taparía los controles:
         // se limita su altura y la vista previa encaja dentro conservando la proporción
         CanvasArea(state, vm, Modifier.fillMaxWidth().heightIn(max = screenHeight * if (short) 0.6f else 0.42f).padding(horizontal = 8.dp))

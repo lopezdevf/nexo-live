@@ -3,12 +3,15 @@
 #pragma once
 
 #include "AudioCapture.h"
+#include "CameraCapture.h"
+#include "Devices.h"
 #include "Link.h"
 #include "ScreenCapture.h"
 #include "VideoEncoder.h"
 
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
 
@@ -63,6 +66,9 @@ public:
     /** fps codificados y kbps enviados desde la última llamada. */
     void TakeStats(uint32_t& frames, uint64_t& bytes, int& latencyMs, uint32_t& bitrateKbps, uint32_t& keyframes, uint64_t& encodedBytes);
 
+    /** Cámaras y micrófonos del PC que el móvil está recibiendo ahora. */
+    std::vector<std::wstring> ActiveDevices();
+
     /** Se llama desde otros hilos cada vez que cambia el estado. */
     std::function<void()> onStateChanged;
 
@@ -72,6 +78,21 @@ private:
     void StopPipeline();
     void SetState(StreamState state, const std::wstring& error = {});
     void AdaptBitrate();
+
+    /** Cámara (con su codificador) o micrófono del PC que el móvil pidió en la señal [stream]. */
+    struct DeviceStream {
+        uint8_t stream = 0;
+        PcDevice device;
+        std::unique_ptr<CameraCapture> camera;
+        std::unique_ptr<VideoEncoder> encoder;
+        std::unique_ptr<AudioCapture> microphone;
+    };
+    void SyncDevices();
+    void RefreshDeviceList();
+    bool StartDeviceStream(DeviceStream& stream);
+    static void StopDeviceStream(DeviceStream& stream);
+    void StopDeviceStreams();
+    void KeyframeForStream(uint8_t stream);
 
     std::thread worker_;
     std::mutex mutex_;
@@ -85,6 +106,14 @@ private:
     int stableSeconds_ = 0;
     int secondsSinceChange_ = 0;
     std::wstring error_;
+
+    winrt::com_ptr<ID3D11Device> d3dDevice_;
+    std::vector<PcDevice> devices_;
+    std::vector<Subscription> wanted_;  // con mutex_
+    bool devicesPending_ = false;       // con mutex_
+    int deviceListSeconds_ = 0;
+    std::mutex devicesMutex_;
+    std::vector<std::shared_ptr<DeviceStream>> deviceStreams_;  // con devicesMutex_
 
     LinkSession link_;
     ScreenCapture capture_;

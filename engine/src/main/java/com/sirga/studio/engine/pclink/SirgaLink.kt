@@ -39,6 +39,16 @@ object SirgaLink {
      * (incluye la vuelta del aviso por la red) y no depende de sincronizar relojes.
      */
     const val LATENCY_REPORT = 0x07
+    /** u8 número · por cada dispositivo: u8 tipo (1 cámara, 2 micrófono) · u16+id · u16+nombre (UTF-8) */
+    const val DEVICE_LIST = 0x08
+
+    // Señales extra (cámaras y micrófonos del PC). La señal 0 es la pantalla y el sonido, con los tipos de arriba
+    /** u8 señal · u16 ancho · u16 alto · u8 fps */
+    const val STREAM_VIDEO_FORMAT = 0x09
+    /** u8 señal · u8 marcas · u64 instante de captura en µs · H.264 Annex-B */
+    const val STREAM_VIDEO_FRAME = 0x0A
+    /** u8 señal · u32 frecuencia · u8 canales · u64 instante en µs · PCM 16 bits little-endian */
+    const val STREAM_AUDIO_PCM = 0x0B
 
     // móvil → PC
     /** Sin contenido: el decodificador necesita empezar por un fotograma clave. */
@@ -47,6 +57,10 @@ object SirgaLink {
     const val TIME_REQUEST = 0x82
     /** u64 instante de captura (reloj del PC) del fotograma que se acaba de mostrar. */
     const val FRAME_SHOWN = 0x83
+    /** u8 número · por cada una: u8 señal (1-255) · u16+id del dispositivo. Lista completa de lo que quiere el móvil. */
+    const val SUBSCRIBE = 0x84
+    /** u8 señal: su decodificador necesita empezar por un fotograma clave. */
+    const val STREAM_KEYFRAME_REQUEST = 0x85
 
     const val RESULT_OK = 0
     const val RESULT_WRONG_CODE = 1
@@ -54,6 +68,8 @@ object SirgaLink {
 
     const val MAX_PACKET = 16 * 1024 * 1024
     private const val MAX_NAME = 256
+    /** Los id de dispositivo de Windows (rutas de símbolo) son largos. */
+    private const val MAX_STRING = 1024
 
     data class Hello(val code: Int, val pcName: String)
 
@@ -99,6 +115,45 @@ object SirgaLink {
         out.flush()
     }
 
+    /** Lista de cámaras y micrófonos del PC. Ignora tipos desconocidos (versiones futuras). */
+    fun parseDeviceList(payload: ByteArray): List<PcDevice> {
+        val input = DataInputStream(payload.inputStream())
+        val count = input.readUnsignedByte()
+        val devices = ArrayList<PcDevice>(count)
+        repeat(count) {
+            val kind = input.readUnsignedByte()
+            val id = readString(input)
+            val name = readString(input)
+            PcDeviceKind.entries.firstOrNull { it.code == kind }?.let { devices += PcDevice(it, id, name) }
+        }
+        return devices
+    }
+
+    fun deviceList(devices: List<PcDevice>): ByteArray {
+        val bytes = java.io.ByteArrayOutputStream()
+        val out = DataOutputStream(bytes)
+        out.writeByte(devices.size.coerceAtMost(255))
+        devices.take(255).forEach { device ->
+            out.writeByte(device.kind.code)
+            writeString(out, device.id)
+            writeString(out, device.name)
+        }
+        return bytes.toByteArray()
+    }
+
+    /** [streams]: señal (1-255) → id del dispositivo. */
+    fun subscribe(streams: Map<Int, String>): ByteArray {
+        val bytes = java.io.ByteArrayOutputStream()
+        val out = DataOutputStream(bytes)
+        val list = streams.entries.filter { it.key in 1..255 }.take(255)
+        out.writeByte(list.size)
+        list.forEach { (stream, deviceId) ->
+            out.writeByte(stream)
+            writeString(out, deviceId)
+        }
+        return bytes.toByteArray()
+    }
+
     fun timeRequest(phoneUs: Long): ByteArray = ByteBuffer.allocate(8).putLong(phoneUs).array()
 
     fun frameShown(captureUs: Long): ByteArray = ByteBuffer.allocate(8).putLong(captureUs).array()
@@ -121,20 +176,25 @@ object SirgaLink {
 
     private fun readString(input: DataInputStream): String {
         val length = input.readUnsignedShort()
-        if (length > MAX_NAME * 4) throw IOException("Nombre de $length bytes")
+        if (length > MAX_STRING) throw IOException("Texto de $length bytes")
         val bytes = ByteArray(length)
         input.readFully(bytes)
         return String(bytes, Charsets.UTF_8)
     }
 
     private fun writeString(out: DataOutputStream, value: String) {
-        val bytes = value.take(MAX_NAME).toByteArray(Charsets.UTF_8)
+        val bytes = value.take(MAX_STRING / 4).toByteArray(Charsets.UTF_8)
         out.writeShort(bytes.size)
         out.write(bytes)
     }
 
     private val EMPTY = ByteArray(0)
 }
+
+enum class PcDeviceKind(val code: Int) { Camera(1), Microphone(2) }
+
+/** Cámara o micrófono conectado al PC. [id] lo da Windows y es estable mientras siga conectado. */
+data class PcDevice(val kind: PcDeviceKind, val id: String, val name: String)
 
 /**
  * Traduce la hora del móvil al reloj del PC para medir el retraso real de cada fotograma

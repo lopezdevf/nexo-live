@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cwctype>
 #include <set>
 
 // Ignorar el «puerto inalcanzable» de ICMP en sockets UDP (no siempre está en las cabeceras del SDK)
@@ -23,9 +24,15 @@ constexpr uint8_t kVideoFrame = 0x02;
 constexpr uint8_t kAudioPcm = 0x03;
 constexpr uint8_t kTimeReply = 0x05;
 constexpr uint8_t kLatencyReport = 0x07;
+constexpr uint8_t kDeviceList = 0x08;
+constexpr uint8_t kStreamVideoFormat = 0x09;
+constexpr uint8_t kStreamVideoFrame = 0x0A;
+constexpr uint8_t kStreamAudioPcm = 0x0B;
 constexpr uint8_t kKeyframeRequest = 0x81;
 constexpr uint8_t kTimeRequest = 0x82;
 constexpr uint8_t kFrameShown = 0x83;
+constexpr uint8_t kSubscribe = 0x84;
+constexpr uint8_t kStreamKeyframeRequest = 0x85;
 constexpr size_t kMaxPacket = 16 * 1024 * 1024;
 /** Más fotogramas en cola que esto significa que la red va por detrás: mejor saltar al presente. */
 constexpr size_t kMaxQueuedVideoFrames = 3;
@@ -45,6 +52,13 @@ void PutU64(std::vector<uint8_t>& out, uint64_t value) {
 
 uint16_t GetU16(const uint8_t* p) { return static_cast<uint16_t>((p[0] << 8) | p[1]); }
 
+void PutString(std::vector<uint8_t>& out, const std::wstring& value) {
+    std::string utf8 = ToUtf8(value);
+    if (utf8.size() > 1024) utf8.resize(1024);
+    PutU16(out, static_cast<uint32_t>(utf8.size()));
+    out.insert(out.end(), utf8.begin(), utf8.end());
+}
+
 std::vector<uint8_t> Header(uint8_t type, size_t payloadSize) {
     std::vector<uint8_t> packet;
     packet.reserve(5 + payloadSize);
@@ -53,10 +67,26 @@ std::vector<uint8_t> Header(uint8_t type, size_t payloadSize) {
     return packet;
 }
 
+struct LocalSubnet {
+    uint32_t network = 0;
+    uint32_t mask = 0;
+    bool usb = false;
+};
+
 struct DiscoveryTargets {
     std::vector<in_addr> broadcasts;
     std::vector<in_addr> hosts;
+    std::vector<LocalSubnet> subnets;
 };
+
+/** Adaptador de red que crea el anclaje USB del móvil (Remote NDIS o NCM por USB). */
+bool IsUsbTetheringAdapter(const IP_ADAPTER_ADDRESSES* adapter) {
+    std::wstring text = std::wstring(adapter->Description ? adapter->Description : L"") + L" " + (adapter->FriendlyName ? adapter->FriendlyName : L"");
+    std::transform(text.begin(), text.end(), text.begin(), ::towlower);
+    for (const wchar_t* hint : {L"ndis", L"usb", L"android", L"ncm"})
+        if (text.find(hint) != std::wstring::npos) return true;
+    return false;
+}
 
 /**
  * Adónde preguntar por los móviles: la dirección de difusión de cada adaptador IPv4 activo y, además, cada
@@ -89,6 +119,7 @@ DiscoveryTargets LocalDiscoveryTargets() {
             in_addr broadcast{};
             broadcast.s_addr = htonl(host | ~mask);
             result.broadcasts.push_back(broadcast);
+            result.subnets.push_back({host & mask, mask, IsUsbTetheringAdapter(adapter)});
             if ((host >> 16) == 0xA9FE) continue;  // 169.254.x.x: sin DHCP, no hay móviles ahí
             uint32_t sweepMask = prefix >= 24 ? mask : 0xFFFFFF00u;
             uint32_t network = host & sweepMask;
@@ -161,10 +192,15 @@ std::vector<PhoneInfo> DiscoverPhones(int timeoutMs) {
         phone.source = FromUtf8(std::string(buffer + 11 + deviceLen, sourceLen));
         char ip[INET_ADDRSTRLEN]{};
         inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
+        uint32_t fromHost = ntohl(from.sin_addr.s_addr);
+        for (const auto& subnet : discovery.subnets)
+            if (subnet.usb && (fromHost & subnet.mask) == subnet.network) phone.usb = true;
         phone.ip = ip;
         if (seen.insert({phone.ip, phone.port}).second) phones.push_back(std::move(phone));
     }
     closesocket(s);
+    // Por cable primero: si el móvil responde por USB y por WiFi, lo normal es querer el cable
+    std::stable_sort(phones.begin(), phones.end(), [](const PhoneInfo& a, const PhoneInfo& b) { return a.usb && !b.usb; });
     return phones;
 }
 
@@ -266,8 +302,8 @@ void LinkSession::Close() {
     }
     std::lock_guard lock(queueMutex_);
     queue_.clear();
-    queuedVideoFrames_ = 0;
-    dropUntilKeyframe_ = false;
+    queuedVideoFrames_.fill(0);
+    dropUntilKeyframe_.fill(false);
 }
 
 void LinkSession::SendVideoFormat(uint32_t width, uint32_t height, uint32_t fps) {
@@ -304,26 +340,80 @@ void LinkSession::SendAudio(const int16_t* pcm, size_t frames, uint32_t sampleRa
     Enqueue(std::move(packet));
 }
 
+void LinkSession::SendDeviceList(const std::vector<PcDevice>& devices) {
+    if (!connected_) return;
+    Packet packet;
+    std::vector<uint8_t> body;
+    body.push_back(static_cast<uint8_t>(std::min<size_t>(devices.size(), 255)));
+    for (size_t i = 0; i < devices.size() && i < 255; i++) {
+        body.push_back(static_cast<uint8_t>(devices[i].kind));
+        PutString(body, devices[i].id);
+        PutString(body, devices[i].name);
+    }
+    packet.data = Header(kDeviceList, body.size());
+    packet.data.insert(packet.data.end(), body.begin(), body.end());
+    Enqueue(std::move(packet));
+}
+
+void LinkSession::SendStreamVideoFormat(uint8_t stream, uint32_t width, uint32_t height, uint32_t fps) {
+    Packet packet;
+    packet.data = Header(kStreamVideoFormat, 6);
+    packet.data.push_back(stream);
+    PutU16(packet.data, width);
+    PutU16(packet.data, height);
+    packet.data.push_back(static_cast<uint8_t>(fps));
+    Enqueue(std::move(packet));
+}
+
+void LinkSession::SendStreamVideoFrame(uint8_t stream, const uint8_t* data, size_t size, bool keyframe, int64_t captureUs) {
+    if (!connected_ || size + 10 > kMaxPacket) return;
+    Packet packet;
+    packet.video = true;
+    packet.keyframe = keyframe;
+    packet.stream = stream;
+    packet.data = Header(kStreamVideoFrame, 10 + size);
+    packet.data.push_back(stream);
+    packet.data.push_back(keyframe ? 1 : 0);
+    PutU64(packet.data, static_cast<uint64_t>(captureUs));
+    packet.data.insert(packet.data.end(), data, data + size);
+    Enqueue(std::move(packet));
+}
+
+void LinkSession::SendStreamAudio(uint8_t stream, const int16_t* pcm, size_t frames, uint32_t sampleRate, uint32_t channels, int64_t captureUs) {
+    if (!connected_) return;
+    size_t bytes = frames * channels * sizeof(int16_t);
+    Packet packet;
+    packet.data = Header(kStreamAudioPcm, 14 + bytes);
+    packet.data.push_back(stream);
+    PutU32(packet.data, sampleRate);
+    packet.data.push_back(static_cast<uint8_t>(channels));
+    PutU64(packet.data, static_cast<uint64_t>(captureUs));
+    auto raw = reinterpret_cast<const uint8_t*>(pcm);
+    packet.data.insert(packet.data.end(), raw, raw + bytes);
+    Enqueue(std::move(packet));
+}
+
 void LinkSession::Enqueue(Packet&& packet) {
     bool wantKeyframe = false;
+    uint8_t stream = packet.stream;
     {
         std::lock_guard lock(queueMutex_);
         if (!connected_) return;
         if (packet.video) {
-            if (dropUntilKeyframe_ && !packet.keyframe) return;
-            if (queuedVideoFrames_ >= kMaxQueuedVideoFrames) {
-                // La red va por detrás: se tira el vídeo pendiente y se salta al presente
-                std::erase_if(queue_, [](const Packet& p) { return p.video; });
-                queuedVideoFrames_ = 0;
-                congestionEvents_++;
+            if (dropUntilKeyframe_[stream] && !packet.keyframe) return;
+            if (queuedVideoFrames_[stream] >= kMaxQueuedVideoFrames) {
+                // La red va por detrás: se tira el vídeo pendiente de esta señal y se salta al presente
+                std::erase_if(queue_, [stream](const Packet& p) { return p.video && p.stream == stream; });
+                queuedVideoFrames_[stream] = 0;
+                if (stream == 0) congestionEvents_++;
                 if (!packet.keyframe) {
-                    dropUntilKeyframe_ = true;
+                    dropUntilKeyframe_[stream] = true;
                     wantKeyframe = true;
                 }
             }
             if (!wantKeyframe) {
-                dropUntilKeyframe_ = false;
-                queuedVideoFrames_++;
+                dropUntilKeyframe_[stream] = false;
+                queuedVideoFrames_[stream]++;
                 queue_.push_back(std::move(packet));
             }
         } else {
@@ -331,7 +421,7 @@ void LinkSession::Enqueue(Packet&& packet) {
         }
     }
     queueSignal_.notify_one();
-    if (wantKeyframe && onKeyframeRequest) onKeyframeRequest();
+    if (wantKeyframe && onKeyframeRequest) onKeyframeRequest(stream);
 }
 
 void LinkSession::WriterLoop() {
@@ -343,7 +433,7 @@ void LinkSession::WriterLoop() {
             if (closing_) return;
             packet = std::move(queue_.front());
             queue_.pop_front();
-            if (packet.video) queuedVideoFrames_--;
+            if (packet.video && queuedVideoFrames_[packet.stream] > 0) queuedVideoFrames_[packet.stream]--;
         }
         if (!SendAll(packet.data.data(), packet.data.size())) {
             Fail();
@@ -380,7 +470,24 @@ void LinkSession::ReaderLoop() {
                 return;
             }
         } else if (header[0] == kKeyframeRequest) {
-            if (onKeyframeRequest) onKeyframeRequest();
+            if (onKeyframeRequest) onKeyframeRequest(0);
+        } else if (header[0] == kStreamKeyframeRequest && length >= 1) {
+            if (onKeyframeRequest) onKeyframeRequest(payload[0]);
+        } else if (header[0] == kSubscribe && length >= 1) {
+            // u8 número · por cada una: u8 señal · u16 longitud + id del dispositivo (UTF-8)
+            std::vector<Subscription> wanted;
+            size_t pos = 1;
+            for (uint8_t i = 0; i < payload[0] && pos + 3 <= length; i++) {
+                Subscription sub;
+                sub.stream = payload[pos];
+                size_t idLength = GetU16(&payload[pos + 1]);
+                pos += 3;
+                if (pos + idLength > length) break;
+                sub.deviceId = FromUtf8(std::string(reinterpret_cast<const char*>(&payload[pos]), idLength));
+                pos += idLength;
+                if (sub.stream != 0) wanted.push_back(std::move(sub));
+            }
+            if (onSubscribe) onSubscribe(std::move(wanted));
         } else if (header[0] == kFrameShown && length >= 8) {
             // Captura → decodificado en el móvil → aviso de vuelta. Es una cota superior del retraso real (incluye
             // la vuelta del aviso) y no depende de sincronizar relojes. Se informa la media de cada segundo

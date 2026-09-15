@@ -57,6 +57,33 @@ sealed interface Source {
         override val hasAudio = true
     }
 
+    /**
+     * Cámara conectada al PC ([deviceId] de Windows, [deviceName] para mostrarla aunque el PC no esté).
+     * Llega por la conexión de la fuente PC [pcSourceId].
+     */
+    data class PcCamera(
+        override val id: String,
+        override val name: String,
+        val pcSourceId: String,
+        val deviceId: String,
+        val deviceName: String,
+    ) : Source {
+        override val hasVideo = true
+        override val hasAudio = false
+    }
+
+    /** Micrófono conectado al PC, por la conexión de la fuente PC [pcSourceId]. */
+    data class PcMicrophone(
+        override val id: String,
+        override val name: String,
+        val pcSourceId: String,
+        val deviceId: String,
+        val deviceName: String,
+    ) : Source {
+        override val hasVideo = false
+        override val hasAudio = true
+    }
+
     /** Captura de pantalla vía MediaProjection (juegos, apps). */
     data class Screen(
         override val id: String,
@@ -132,13 +159,15 @@ enum class TextAlignment { Start, Center, End }
  */
 data class AudioDeviceKey(val type: Int, val productName: String, val address: String = "")
 
-enum class SourceKind { Camera, UsbCamera, PcInput, Screen, Image, Text, SolidColor, Microphone, InternalAudio }
+enum class SourceKind { Camera, UsbCamera, PcInput, PcCamera, PcMicrophone, Screen, Image, Text, SolidColor, Microphone, InternalAudio }
 
 val Source.kind: SourceKind
     get() = when (this) {
         is Source.Camera -> SourceKind.Camera
         is Source.UsbCamera -> SourceKind.UsbCamera
         is Source.PcInput -> SourceKind.PcInput
+        is Source.PcCamera -> SourceKind.PcCamera
+        is Source.PcMicrophone -> SourceKind.PcMicrophone
         is Source.Screen -> SourceKind.Screen
         is Source.Image -> SourceKind.Image
         is Source.Text -> SourceKind.Text
@@ -151,6 +180,8 @@ fun Source.renamed(name: String): Source = when (this) {
     is Source.Camera -> copy(name = name)
     is Source.UsbCamera -> copy(name = name)
     is Source.PcInput -> copy(name = name)
+    is Source.PcCamera -> copy(name = name)
+    is Source.PcMicrophone -> copy(name = name)
     is Source.Screen -> copy(name = name)
     is Source.Image -> copy(name = name)
     is Source.Text -> copy(name = name)

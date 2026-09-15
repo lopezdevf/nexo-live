@@ -518,7 +518,8 @@ void DrawPhone(const DRAWITEMSTRUCT* item) {
     RECT name{r.left + S(16), r.top + S(5), r.right - S(10), r.top + S(26)};
     DrawText(dc, phone.device, name, app.fontBody, kTextHigh, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
     RECT sub{r.left + S(16), r.top + S(25), r.right - S(10), r.bottom - S(3)};
-    DrawText(dc, L"Fuente «" + phone.source + L"» · " + AddressOf(phone), sub, app.fontSmall, kTextMid, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+    DrawText(dc, L"Fuente «" + phone.source + L"» · " + (phone.usb ? L"por cable USB" : AddressOf(phone)), sub, app.fontSmall, phone.usb ? kAccentGlow : kTextMid,
+             DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 }
 
 // ---- Ventana -------------------------------------------------------------------------------
@@ -564,11 +565,13 @@ void OnStatsTimer() {
     uint32_t keyframes = 0;
     uint64_t encoded = 0;
     app.streamer.TakeStats(frames, bytes, latency, bitrate, keyframes, encoded);
-    wchar_t detail[300];
+    wchar_t detail[700];
     std::wstring latencyText = latency >= 0 ? L" · retraso " + std::to_wstring(latency) + L" ms" : L"";
     if (bitrate > 0 && bitrate < kQualities[std::max(0, ComboBox_GetCurSel(app.quality))].bitrateKbps) latencyText += L" · red lenta: calidad ajustada";
-    _snwprintf_s(detail, _TRUNCATE, L"%u fps · %.1f Mbps%s\n%s", frames, bytes * 8 / 1'000'000.0, latencyText.c_str(),
-                 app.streamer.EncoderName().c_str());
+    std::wstring devicesText;
+    for (const auto& name : app.streamer.ActiveDevices()) devicesText += (devicesText.empty() ? L"\nTambién envía: " : L", ") + name;
+    _snwprintf_s(detail, _TRUNCATE, L"%u fps · %.1f Mbps%s\n%s%s", frames, bytes * 8 / 1'000'000.0, latencyText.c_str(),
+                 app.streamer.EncoderName().c_str(), devicesText.c_str());
     SetStatus(app.status, kGood, detail);
     static int ticks = 0;
     static uint32_t windowKeyframes = 0;

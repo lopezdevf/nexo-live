@@ -32,6 +32,7 @@ import com.sirga.studio.engine.output.MultiStreamer
 import com.sirga.studio.engine.output.OutputFormat
 import com.sirga.studio.engine.output.PlatformCatalog
 import com.sirga.studio.engine.output.Recorder
+import com.sirga.studio.engine.pclink.PcCameraCapture
 import com.sirga.studio.engine.pclink.PcCapture
 import com.sirga.studio.engine.pclink.PcLinkHub
 import com.sirga.studio.engine.render.CaptureFactory
@@ -95,6 +96,9 @@ class StudioEngine(
             is Source.UsbCamera -> "usb:${source.deviceName ?: "auto"}"
             is Source.Screen -> "screen"
             is Source.PcInput -> "pc:${source.port}"
+            // Con el puerto y el código de su fuente PC: si cambian, la cámara se vuelve a abrir por la conexión nueva
+            is Source.PcCamera -> (studio.state.value.sources[source.pcSourceId] as? Source.PcInput)
+                .let { pc -> "pccam:${pc?.port}:${pc?.code}:${source.deviceId}" }
             else -> "src:${source.id}"
         }
 
@@ -403,6 +407,7 @@ class StudioEngine(
         }
         is Source.UsbCamera -> UvcCapture({ devices.findUsbCamera(source.deviceName) }, canvas.longSide)
         is Source.PcInput -> PcCapture(pcLink, source)
+        is Source.PcCamera -> PcCameraCapture(pcLink, studio.state.value.sources[source.pcSourceId] as? Source.PcInput, source)
         is Source.Screen -> ScreenCapture(projection, canvas.longSide)
         else -> null
     }

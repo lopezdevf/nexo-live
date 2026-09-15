@@ -105,6 +105,129 @@ void Streamer::AdaptBitrate() {
     }
 }
 
+/** Cada 3 s: si se conecta o desconecta una cámara o un micrófono, el móvil recibe la lista nueva. */
+void Streamer::RefreshDeviceList() {
+    if (++deviceListSeconds_ < 3) return;
+    deviceListSeconds_ = 0;
+    auto now = EnumerateDevices();
+    if (now == devices_) return;
+    devices_ = std::move(now);
+    Log(L"Dispositivos del PC: %zu", devices_.size());
+    link_.SendDeviceList(devices_);
+}
+
+/** Aplica la lista de cámaras y micrófonos que quiere el móvil: para las que sobran y abre las nuevas. */
+void Streamer::SyncDevices() {
+    std::vector<Subscription> wanted;
+    {
+        std::lock_guard lock(mutex_);
+        wanted = wanted_;
+    }
+    auto isWanted = [&](const DeviceStream& s) {
+        return std::any_of(wanted.begin(), wanted.end(), [&](const Subscription& w) { return w.stream == s.stream && w.deviceId == s.device.id; });
+    };
+    // Parar fuera del cerrojo: el codificador puede estar entregando y pedir un fotograma clave por la misma vía
+    std::vector<std::shared_ptr<DeviceStream>> removed;
+    {
+        std::lock_guard lock(devicesMutex_);
+        for (auto it = deviceStreams_.begin(); it != deviceStreams_.end();) {
+            if (isWanted(**it)) {
+                ++it;
+            } else {
+                removed.push_back(*it);
+                it = deviceStreams_.erase(it);
+            }
+        }
+    }
+    for (auto& s : removed) StopDeviceStream(*s);
+
+    for (const auto& w : wanted) {
+        {
+            std::lock_guard lock(devicesMutex_);
+            if (std::any_of(deviceStreams_.begin(), deviceStreams_.end(), [&](const auto& s) { return s->stream == w.stream; })) continue;
+        }
+        auto device = std::find_if(devices_.begin(), devices_.end(), [&](const PcDevice& d) { return d.id == w.deviceId; });
+        if (device == devices_.end()) {
+            Log(L"El móvil pide un dispositivo que ya no está conectado");
+            continue;
+        }
+        auto stream = std::make_shared<DeviceStream>();
+        stream->stream = w.stream;
+        stream->device = *device;
+        if (!StartDeviceStream(*stream)) {
+            StopDeviceStream(*stream);
+            continue;
+        }
+        std::lock_guard lock(devicesMutex_);
+        deviceStreams_.push_back(std::move(stream));
+    }
+}
+
+bool Streamer::StartDeviceStream(DeviceStream& s) {
+    const uint8_t id = s.stream;
+    if (s.device.kind == DeviceKind::Microphone) {
+        s.microphone = std::make_unique<AudioCapture>();
+        s.microphone->Start(
+            [this, id](const int16_t* pcm, size_t frames, int64_t captureUs) {
+                link_.SendStreamAudio(id, pcm, frames, AudioCapture::kSampleRate, AudioCapture::kChannels, captureUs);
+            },
+            s.device.id);
+        Log(L"Enviando el micrófono «%s»", s.device.name.c_str());
+        return true;
+    }
+    if (!d3dDevice_) return false;
+    s.camera = std::make_unique<CameraCapture>();
+    if (!s.camera->Open(d3dDevice_.get(), s.device.id)) return false;
+    VideoEncoder::Config config;
+    config.width = s.camera->Width() & ~1u;
+    config.height = s.camera->Height() & ~1u;
+    config.fps = std::min<uint32_t>(s.camera->Fps(), 30);
+    config.bitrateKbps = config.height >= 1080 ? 6000 : config.height >= 720 ? 4000 : 2500;
+    s.encoder = std::make_unique<VideoEncoder>();
+    if (!s.encoder->Start(d3dDevice_.get(), config, [this, id](const uint8_t* data, size_t size, bool keyframe, int64_t captureUs) {
+            link_.SendStreamVideoFrame(id, data, size, keyframe, captureUs);
+        })) {
+        return false;
+    }
+    link_.SendStreamVideoFormat(id, config.width, config.height, config.fps);
+    VideoEncoder* encoder = s.encoder.get();
+    s.camera->Begin([encoder](ID3D11Texture2D* frame, int64_t captureUs) { encoder->SubmitFrame(frame, captureUs); });
+    Log(L"Enviando la cámara «%s»", s.device.name.c_str());
+    return true;
+}
+
+void Streamer::StopDeviceStream(DeviceStream& s) {
+    if (s.camera) s.camera->Stop();
+    if (s.encoder) s.encoder->Stop();
+    if (s.microphone) s.microphone->Stop();
+}
+
+void Streamer::StopDeviceStreams() {
+    std::vector<std::shared_ptr<DeviceStream>> all;
+    {
+        std::lock_guard lock(devicesMutex_);
+        all.swap(deviceStreams_);
+    }
+    for (auto& s : all) StopDeviceStream(*s);
+}
+
+void Streamer::KeyframeForStream(uint8_t stream) {
+    std::shared_ptr<DeviceStream> target;
+    {
+        std::lock_guard lock(devicesMutex_);
+        for (auto& s : deviceStreams_)
+            if (s->stream == stream) target = s;
+    }
+    if (target && target->encoder) target->encoder->RequestKeyframe();
+}
+
+std::vector<std::wstring> Streamer::ActiveDevices() {
+    std::vector<std::wstring> names;
+    std::lock_guard lock(devicesMutex_);
+    for (auto& s : deviceStreams_) names.push_back(s->device.name);
+    return names;
+}
+
 void Streamer::SetState(StreamState state, const std::wstring& error) {
     {
         std::lock_guard lock(mutex_);
@@ -118,7 +241,21 @@ void Streamer::Run(StreamSettings settings) {
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     std::wstring pcName = ComputerName();
     // Se fijan antes de conectar y no cambian: los hilos de la conexión los leen sin cerrojo
-    link_.onKeyframeRequest = [this] { encoder_.RequestKeyframe(); };
+    link_.onKeyframeRequest = [this](uint8_t stream) {
+        if (stream == 0) {
+            encoder_.RequestKeyframe();
+        } else {
+            KeyframeForStream(stream);
+        }
+    };
+    link_.onSubscribe = [this](std::vector<Subscription> wanted) {
+        {
+            std::lock_guard lock(mutex_);
+            wanted_ = std::move(wanted);
+            devicesPending_ = true;
+        }
+        wake_.notify_all();
+    };
     link_.onDisconnected = [this] {
         {
             std::lock_guard lock(mutex_);
@@ -155,9 +292,17 @@ void Streamer::Run(StreamSettings settings) {
             if (started) {
                 SetState(StreamState::Streaming);
                 std::unique_lock lock(mutex_);
-                while (!wake_.wait_for(lock, std::chrono::seconds(1), [this] { return stopRequested_ || disconnected_; })) {
+                while (true) {
+                    bool woke = wake_.wait_for(lock, std::chrono::seconds(1), [this] { return stopRequested_ || disconnected_ || devicesPending_; });
+                    if (stopRequested_ || disconnected_) break;
+                    bool pending = devicesPending_;
+                    devicesPending_ = false;
                     lock.unlock();
-                    AdaptBitrate();
+                    if (pending) SyncDevices();
+                    if (!woke) {
+                        AdaptBitrate();
+                        RefreshDeviceList();
+                    }
                     lock.lock();
                 }
             }
@@ -210,6 +355,15 @@ bool Streamer::StartPipeline(const StreamSettings& settings) {
             encoderName_ = encoder_.Name();
         }
         link_.SendVideoFormat(config.width, config.height, config.fps);
+        d3dDevice_ = device;
+        {
+            std::lock_guard lock(mutex_);
+            wanted_.clear();
+            devicesPending_ = false;
+        }
+        devices_ = EnumerateDevices();
+        deviceListSeconds_ = 0;
+        link_.SendDeviceList(devices_);
 
         if (!capture_.Start(device.get(), settings.monitor, settings.cursor, config.fps,
                             [this](ID3D11Texture2D* frame, int64_t captureUs) { encoder_.SubmitFrame(frame, captureUs); })) {
@@ -234,8 +388,10 @@ bool Streamer::StartPipeline(const StreamSettings& settings) {
 void Streamer::StopPipeline() {
     capture_.Stop();
     audio_.Stop();
+    StopDeviceStreams();
     link_.Close();
     encoder_.Stop();
+    d3dDevice_ = nullptr;
     SetThreadExecutionState(ES_CONTINUOUS);
 }
 

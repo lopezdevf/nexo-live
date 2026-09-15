@@ -23,6 +23,8 @@ add_executable(SirgaStudioPC WIN32
     src/VideoEncoder.cpp
     src/AudioCapture.cpp
     src/Streamer.cpp
+    src/Devices.cpp
+    src/CameraCapture.cpp
     res/app.rc
 )
 
@@ -32,7 +34,7 @@ target_compile_options(SirgaStudioPC PRIVATE /W4 /permissive- /EHsc /utf-8 /bigo
 target_link_options(SirgaStudioPC PRIVATE /MANIFEST:NO)
 target_link_libraries(SirgaStudioPC PRIVATE
     d3d11 dxgi
-    mfplat mfuuid
+    mfplat mfuuid mf mfreadwrite
     ws2_32 iphlpapi
     ole32 oleaut32 shell32 windowsapp
     avrt winmm

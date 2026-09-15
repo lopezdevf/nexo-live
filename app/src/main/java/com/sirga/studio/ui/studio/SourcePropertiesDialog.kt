@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -62,6 +63,8 @@ import com.sirga.studio.engine.model.kind
 import com.sirga.studio.engine.model.newPairingCode
 import com.sirga.studio.engine.pclink.PcLinkAddresses
 import com.sirga.studio.engine.pclink.PcLinkStatus
+import com.sirga.studio.engine.pclink.PcDeviceKind
+import com.sirga.studio.engine.pclink.PcDevice
 import com.sirga.studio.ui.destinations.Callout
 import com.sirga.studio.ui.destinations.ChoiceRow
 import com.sirga.studio.ui.destinations.SirgaField
@@ -81,6 +84,10 @@ class SourcePropertiesModel(
     val screenCaptureActive: Boolean,
     val error: String?,
     val pcLink: PcLinkStatus? = null,
+    /** Cámaras y micrófonos del PC: los de esta fuente PC o los del PC del que viene esta cámara o micrófono. */
+    val pcDevices: List<PcDevice> = emptyList(),
+    /** Para una cámara o un micrófono del PC: su fuente PC. */
+    val pcSource: Source.PcInput? = null,
 )
 
 @Composable
@@ -93,6 +100,7 @@ fun SourcePropertiesDialog(
     onChannel: (AudioChannel) -> Unit,
     onDelete: () -> Unit,
     onRequestScreenCapture: () -> Unit,
+    onAddPcDevice: (PcDevice) -> Unit = {},
 ) {
     var confirmDelete by remember { mutableStateOf(false) }
     val source = model.source
@@ -115,7 +123,13 @@ fun SourcePropertiesDialog(
                 when (source) {
                     is Source.Camera -> CameraSection(source, model.cameras, onUpdate)
                     is Source.UsbCamera -> UsbCameraSection(source, model.usbCameras, onUpdate)
-                    is Source.PcInput -> PcInputSection(source, model.pcLink, onUpdate)
+                    is Source.PcInput -> PcInputSection(source, model.pcLink, model.pcDevices, onUpdate, onAddPcDevice)
+                    is Source.PcCamera -> PcDeviceSection(PcDeviceKind.Camera, source.deviceId, source.deviceName, model.pcSource, model.pcLink, model.pcDevices) {
+                        onUpdate(source.copy(deviceId = it.id, deviceName = it.name))
+                    }
+                    is Source.PcMicrophone -> PcDeviceSection(PcDeviceKind.Microphone, source.deviceId, source.deviceName, model.pcSource, model.pcLink, model.pcDevices) {
+                        onUpdate(source.copy(deviceId = it.id, deviceName = it.name))
+                    }
                     is Source.Screen -> ScreenSection(model.screenCaptureActive, onRequestScreenCapture)
                     is Source.Text -> TextSection(source, onUpdate)
                     is Source.SolidColor -> {
@@ -193,7 +207,13 @@ private fun UsbCameraSection(source: Source.UsbCamera, devices: List<UsbCameraEn
 }
 
 @Composable
-private fun PcInputSection(source: Source.PcInput, status: PcLinkStatus?, onUpdate: (Source) -> Unit) {
+private fun PcInputSection(
+    source: Source.PcInput,
+    status: PcLinkStatus?,
+    devices: List<PcDevice>,
+    onUpdate: (Source) -> Unit,
+    onAddDevice: (PcDevice) -> Unit,
+) {
     val addresses = remember { PcLinkAddresses.localAddresses() }
     val uriHandler = LocalUriHandler.current
     SectionLabel("CONEXIÓN CON EL PC")
@@ -205,6 +225,7 @@ private fun PcInputSection(source: Source.PcInput, status: PcLinkStatus?, onUpda
         is PcLinkStatus.Connected -> Callout(
             buildString {
                 append("Conectado a «${status.pcName}»")
+                if (status.viaUsb) append(" por cable USB")
                 if (status.width > 0) append(" · ${status.width}×${status.height}")
                 status.latencyMs?.let { append(" · retraso $it ms") }
             },
@@ -214,6 +235,27 @@ private fun PcInputSection(source: Source.PcInput, status: PcLinkStatus?, onUpda
         is PcLinkStatus.Error -> Callout(status.message, Sirga.colors.record)
         is PcLinkStatus.Waiting -> status.notice?.let { Callout(it, Sirga.colors.record) }
         null -> Unit
+    }
+
+    if (status is PcLinkStatus.Connected) {
+        SectionLabel("CÁMARAS Y MICRÓFONOS DEL PC")
+        if (devices.isEmpty()) {
+            Text("«${status.pcName}» no tiene cámaras ni micrófonos conectados.", color = Sirga.colors.textMid)
+        }
+        devices.forEach { device ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (device.kind == PcDeviceKind.Camera) SourceKindIcons.pcCamera else SourceKindIcons.pcMicrophone,
+                    contentDescription = null, tint = Sirga.colors.textMid, modifier = Modifier.size(20.dp),
+                )
+                Text(device.name, color = Sirga.colors.textHigh, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
+                TextButton(onClick = { onAddDevice(device) }) { Text("Añadir", color = Sirga.colors.accentText) }
+            }
+        }
+        Text(
+            "Se añaden como fuentes: la cámara, en una esquina del lienzo; el micrófono, en el mezclador.",
+            style = Sirga.numeric, color = Sirga.colors.textLow,
+        )
     }
 
     SectionLabel("CÓDIGO PARA EL PC")
@@ -258,6 +300,36 @@ private fun PcInputSection(source: Source.PcInput, status: PcLinkStatus?, onUpda
 
     SectionLabel("PUERTO")
     Chips(listOf(9000, 9001, 9002, 9003), source.port, { "$it" }) { onUpdate(source.copy(port = it)) }
+}
+
+@Composable
+private fun PcDeviceSection(
+    kind: PcDeviceKind,
+    deviceId: String,
+    deviceName: String,
+    pc: Source.PcInput?,
+    status: PcLinkStatus?,
+    devices: List<PcDevice>,
+    onPick: (PcDevice) -> Unit,
+) {
+    val camera = kind == PcDeviceKind.Camera
+    SectionLabel(if (camera) "CÁMARA DEL PC" else "MICRÓFONO DEL PC")
+    if (pc == null) {
+        Callout("La fuente «PC» por la que llegaba se ha borrado. Vuelve a añadirla desde el menú de fuentes.", Sirga.colors.record)
+        return
+    }
+    Text("Llega por la conexión de la fuente «${pc.name}».", color = Sirga.colors.textMid)
+    val options = devices.filter { it.kind == kind }
+    when {
+        status !is PcLinkStatus.Connected -> Callout(
+            "Sirga Studio PC no está conectado. Cuando lo esté, aquí aparecerán ${if (camera) "sus cámaras" else "sus micrófonos"}. Ahora: «$deviceName».",
+            Sirga.colors.textMid,
+        )
+        options.none { it.id == deviceId } -> Callout("«$deviceName» no está conectado a «${status.pcName}». Elige otro:", Sirga.colors.record)
+    }
+    options.forEach { device ->
+        ChoiceRow(device.id == deviceId, device.name, null) { onPick(device) }
+    }
 }
 
 private const val PC_DOWNLOAD_URL = "https://github.com/lopezdevf/sirga-studio/releases/latest"

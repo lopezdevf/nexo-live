@@ -40,8 +40,23 @@ import java.util.concurrent.CopyOnWriteArraySet
 sealed interface PcLinkStatus {
     /** Nadie conectado. [notice] explica el último intento fallido (p. ej. código incorrecto). */
     data class Waiting(val notice: String? = null) : PcLinkStatus
-    data class Connected(val pcName: String, val width: Int, val height: Int, val latencyMs: Long?) : PcLinkStatus
+    /** [viaUsb]: el PC llegó por la red del anclaje USB (cable), no por WiFi. */
+    data class Connected(val pcName: String, val width: Int, val height: Int, val latencyMs: Long?, val viaUsb: Boolean = false) : PcLinkStatus
     data class Error(val message: String) : PcLinkStatus
+}
+
+/**
+ * Cámara o micrófono del PC que llega por la conexión de un [PcLinkReceiver] en su propia señal.
+ * Lo abren la fuente de vídeo y el mezclador; mientras alguien lo use, el PC lo sigue enviando.
+ */
+class PcDeviceStream internal constructor(val id: Int, val kind: PcDeviceKind, val deviceId: String, val deviceName: String) {
+    internal var users = 0
+    @Volatile internal var videoListener: CaptureListener? = null
+    internal var decoder: PcVideoDecoder? = null
+    @Volatile internal var audioListener: ((ShortArray) -> Unit)? = null
+    @Volatile internal var sampleRate = 48_000
+    internal val resampler = LinearResampler()
+    @Volatile internal var lastKeyframeRequest = 0L
 }
 
 /** Dirección por la que el PC puede llegar al móvil. */
@@ -58,6 +73,7 @@ class PcLinkReceiver(
     val code: String,
     private val sourceName: String,
     private val onStatus: (PcLinkStatus) -> Unit,
+    private val onDevices: (List<PcDevice>) -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     @Volatile private var server: ServerSocket? = null
@@ -79,6 +95,14 @@ class PcLinkReceiver(
     @Volatile var targetSampleRate = 48_000
 
     private val clock = ClockSync()
+
+    private val _devices = MutableStateFlow<List<PcDevice>>(emptyList())
+    /** Cámaras y micrófonos del PC conectado (vacía sin PC). */
+    val devices: StateFlow<List<PcDevice>> = _devices.asStateFlow()
+
+    private val streamLock = Any()
+    private val deviceStreams = HashMap<String, PcDeviceStream>()
+    private val streamsById = java.util.concurrent.ConcurrentHashMap<Int, PcDeviceStream>()
 
     /**
      * El ahorro de energía de la WiFi agrupa los paquetes y añade decenas o cientos de milisegundos
@@ -130,6 +154,68 @@ class PcLinkReceiver(
         session = null
         acceptThread?.join(500)
         decoder.release()
+        synchronized(streamLock) { deviceStreams.values.toList() }.forEach { it.decoder?.release() }
+    }
+
+    /** Pide al PC [deviceId] en una señal propia (o comparte la que ya está abierta). */
+    fun openStream(kind: PcDeviceKind, deviceId: String, deviceName: String): PcDeviceStream {
+        val stream = synchronized(streamLock) {
+            val key = "${kind.code}:$deviceId"
+            deviceStreams[key]?.also { it.users++ } ?: run {
+                val id = (1..255).first { !streamsById.containsKey(it) }
+                PcDeviceStream(id, kind, deviceId, deviceName).also { created ->
+                    created.users = 1
+                    if (kind == PcDeviceKind.Camera) {
+                        created.decoder = PcVideoDecoder(
+                            onSize = { w, h -> created.videoListener?.onFormat(CaptureFormat(w, h)) },
+                            onRendered = {},
+                        )
+                    }
+                    deviceStreams[key] = created
+                    streamsById[id] = created
+                }
+            }
+        }
+        session?.sendSubscriptions()
+        return stream
+    }
+
+    fun closeStream(stream: PcDeviceStream) {
+        synchronized(streamLock) {
+            if (--stream.users > 0) return
+            deviceStreams.remove("${stream.kind.code}:${stream.deviceId}")
+            streamsById.remove(stream.id)
+        }
+        stream.videoListener = null
+        stream.audioListener = null
+        stream.decoder?.release()
+        session?.sendSubscriptions()
+    }
+
+    fun setStreamVideo(stream: PcDeviceStream, surface: Surface?, listener: CaptureListener?) {
+        stream.videoListener = listener
+        listener?.onStatus(streamStatus(stream))
+        stream.decoder?.setSurface(surface)
+        if (surface != null) session?.requestStreamKeyframe(stream)
+    }
+
+    fun setStreamAudio(stream: PcDeviceStream, sampleRate: Int, listener: ((ShortArray) -> Unit)?) {
+        stream.sampleRate = sampleRate
+        stream.audioListener = listener
+    }
+
+    private fun streamStatus(stream: PcDeviceStream): CaptureStatus = when (val s = status) {
+        is PcLinkStatus.Error -> CaptureStatus.Error(s.message)
+        is PcLinkStatus.Waiting -> CaptureStatus.Waiting(s.notice ?: "Abre Sirga Studio PC en el ordenador y conecta la fuente «$sourceName» · código $code")
+        is PcLinkStatus.Connected ->
+            if (_devices.value.none { it.id == stream.deviceId }) CaptureStatus.Waiting("«${stream.deviceName}» no está conectada a «${s.pcName}»")
+            else CaptureStatus.Running
+    }
+
+    private fun refreshStreamStatuses() {
+        synchronized(streamLock) { deviceStreams.values.toList() }.forEach { stream ->
+            stream.videoListener?.onStatus(streamStatus(stream))
+        }
     }
 
     private fun acceptLoop() {
@@ -178,6 +264,7 @@ class PcLinkReceiver(
             is PcLinkStatus.Connected -> videoListener?.onStatus(CaptureStatus.Running)
             is PcLinkStatus.Error -> videoListener?.onStatus(CaptureStatus.Error(newStatus.message))
         }
+        refreshStreamStatuses()
     }
 
     fun waitingMessage(notice: String? = (status as? PcLinkStatus.Waiting)?.notice): String =
@@ -210,8 +297,11 @@ class PcLinkReceiver(
                 reportedLatencyMs = null
                 Log.i(TAG, "PC conectado: ${hello.pcName}")
                 runCatching { wifiLock?.acquire() }
-                publish(PcLinkStatus.Connected(hello.pcName, videoWidth, videoHeight, null))
+                val viaUsb = runCatching { NetworkInterface.getByInetAddress(socket.localAddress)?.name?.lowercase() }.getOrNull()
+                    ?.let { it.startsWith("rndis") || it.startsWith("usb") || it.startsWith("ncm") } == true
+                publish(PcLinkStatus.Connected(hello.pcName, videoWidth, videoHeight, null, viaUsb))
                 requestKeyframe()
+                sendSubscriptions()
                 // La hora se pide cada segundo desde otro hilo: mide el retraso y mantiene viva la conexión
                 // aunque la pantalla del PC no cambie y no suene nada
                 Thread({
@@ -238,6 +328,8 @@ class PcLinkReceiver(
                 if (session === this) runCatching { wifiLock?.release() }
                 if (session === this && !released) {
                     session = null
+                    _devices.value = emptyList()
+                    onDevices(emptyList())
                     if (status is PcLinkStatus.Connected) publish(PcLinkStatus.Waiting())
                 }
             }
@@ -267,21 +359,62 @@ class PcLinkReceiver(
                 SirgaLink.TIME_REPLY -> if (packet.payload.size >= 16) {
                     clock.add(phoneSentUs = data.long, pcUs = data.long, phoneReceivedUs = SystemClock.elapsedRealtimeNanos() / 1000)
                 }
+                SirgaLink.DEVICE_LIST -> runCatching { SirgaLink.parseDeviceList(packet.payload) }.getOrNull()?.let { list ->
+                    _devices.value = list
+                    onDevices(list)
+                    refreshStreamStatuses()
+                }
+                SirgaLink.STREAM_VIDEO_FORMAT -> if (packet.payload.size >= 6) {
+                    val stream = streamsById[data.get().toInt() and 0xFF]
+                    stream?.decoder?.setSize(data.short.toInt() and 0xFFFF, data.short.toInt() and 0xFFFF)
+                }
+                SirgaLink.STREAM_VIDEO_FRAME -> if (packet.payload.size > 10) {
+                    val stream = streamsById[data.get().toInt() and 0xFF] ?: return
+                    val keyframe = data.get().toInt() and 1 == 1
+                    val captureUs = data.long
+                    val decoder = stream.decoder ?: return
+                    if (!decoder.decode(packet.payload.copyOfRange(10, packet.payload.size), keyframe, captureUs)) requestStreamKeyframe(stream)
+                }
+                SirgaLink.STREAM_AUDIO_PCM -> if (packet.payload.size > 14) {
+                    val stream = streamsById[data.get().toInt() and 0xFF] ?: return
+                    val listener = stream.audioListener ?: return
+                    val rate = data.int
+                    val channels = data.get().toInt().coerceAtLeast(1)
+                    data.long
+                    toStereo(data.slice().order(ByteOrder.LITTLE_ENDIAN), channels)?.let { listener(stream.resampler.convert(it, rate, stream.sampleRate)) }
+                }
             }
         }
 
         private fun deliverAudio(pcm: ByteBuffer, rate: Int, channels: Int) {
             val listener = audioListener ?: return
+            toStereo(pcm, channels)?.let { listener(resampler.convert(it, rate, targetSampleRate)) }
+        }
+
+        private fun toStereo(pcm: ByteBuffer, channels: Int): ShortArray? {
             val shorts = pcm.asShortBuffer()
             val frames = shorts.remaining() / channels
-            if (frames == 0) return
+            if (frames == 0) return null
             val stereo = ShortArray(frames * 2)
             for (f in 0 until frames) {
                 val l = shorts.get(f * channels)
                 stereo[f * 2] = l
                 stereo[f * 2 + 1] = if (channels > 1) shorts.get(f * channels + 1) else l
             }
-            listener(resampler.convert(stereo, rate, targetSampleRate))
+            return stereo
+        }
+
+        /** Lista completa de cámaras y micrófonos que se usan ahora: el PC abre las nuevas y cierra las demás. */
+        fun sendSubscriptions() {
+            val wanted = synchronized(streamLock) { deviceStreams.values.associate { it.id to it.deviceId } }
+            send(SirgaLink.SUBSCRIBE, SirgaLink.subscribe(wanted))
+        }
+
+        fun requestStreamKeyframe(stream: PcDeviceStream) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - stream.lastKeyframeRequest < 300) return
+            stream.lastKeyframeRequest = now
+            send(SirgaLink.STREAM_KEYFRAME_REQUEST, byteArrayOf(stream.id.toByte()))
         }
 
         fun frameShown(captureUs: Long) = send(SirgaLink.FRAME_SHOWN, SirgaLink.frameShown(captureUs))
@@ -483,6 +616,10 @@ class PcLinkHub(private val context: Context) {
     /** Estado del enlace de cada fuente PC activa, para mostrar conexión y retraso. */
     val statuses: StateFlow<Map<String, PcLinkStatus>> = _statuses.asStateFlow()
 
+    private val _devices = MutableStateFlow<Map<String, List<PcDevice>>>(emptyMap())
+    /** Cámaras y micrófonos de cada PC conectado, por id de su fuente PC. */
+    val devices: StateFlow<Map<String, List<PcDevice>>> = _devices.asStateFlow()
+
     @Synchronized
     fun acquire(source: Source.PcInput): PcLinkReceiver {
         entries[source.id]?.let { entry ->
@@ -496,9 +633,11 @@ class PcLinkHub(private val context: Context) {
         // Una fuente borrada o con otro puerto puede seguir en su tiempo de gracia ocupando este puerto
         entries.entries.filter { it.value.users <= 0 && it.value.receiver.port == source.port }.map { it.key to it.value.receiver }
             .forEach { (id, receiver) -> close(id, receiver) }
-        val receiver = PcLinkReceiver(context, source.port, source.code, source.name) { status ->
-            _statuses.update { it + (source.id to status) }
-        }
+        val receiver = PcLinkReceiver(
+            context, source.port, source.code, source.name,
+            onStatus = { status -> _statuses.update { it + (source.id to status) } },
+            onDevices = { list -> _devices.update { it + (source.id to list) } },
+        )
         receiver.start()
         discovery.register(receiver)
         entries[source.id] = Entry(receiver, 1)
@@ -531,6 +670,7 @@ class PcLinkHub(private val context: Context) {
         receiver.release()
         entries.remove(sourceId)
         _statuses.update { it - sourceId }
+        _devices.update { it - sourceId }
     }
 
     private companion object {
@@ -568,6 +708,45 @@ class PcCapture(private val hub: PcLinkHub, private val source: Source.PcInput) 
             hub.release(source.id, it)
         }
         receiver = null
+        surface?.release()
+        surface = null
+    }
+}
+
+/** Vídeo de una cámara conectada al PC: comparte la conexión de su fuente PC ([pc]). */
+class PcCameraCapture(
+    private val hub: PcLinkHub,
+    private val pc: Source.PcInput?,
+    private val source: Source.PcCamera,
+) : SurfaceCapture {
+    private var receiver: PcLinkReceiver? = null
+    private var stream: PcDeviceStream? = null
+    private var surface: Surface? = null
+
+    override fun start(texture: SurfaceTexture, listener: CaptureListener) {
+        if (pc == null) {
+            listener.onStatus(CaptureStatus.Error("Falta la fuente «PC» por la que llega esta cámara"))
+            return
+        }
+        val r = hub.acquire(pc)
+        val s = r.openStream(PcDeviceKind.Camera, source.deviceId, source.deviceName)
+        receiver = r
+        stream = s
+        val out = Surface(texture)
+        surface = out
+        r.setStreamVideo(s, out, listener)
+    }
+
+    override fun stop() {
+        val r = receiver
+        val s = stream
+        if (r != null && s != null) {
+            r.setStreamVideo(s, null, null)
+            r.closeStream(s)
+            pc?.let { hub.release(it.id, r) }
+        }
+        receiver = null
+        stream = null
         surface?.release()
         surface = null
     }

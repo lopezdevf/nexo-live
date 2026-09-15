@@ -3,9 +3,11 @@
 #pragma once
 
 #include "Common.h"
+#include "Devices.h"
 
 #include <winsock2.h>
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -22,6 +24,14 @@ struct PhoneInfo {
     uint16_t port = 0;
     std::wstring device;
     std::wstring source;
+    /** Encontrado por la red del anclaje USB del móvil (cable), no por WiFi. */
+    bool usb = false;
+};
+
+/** Cámara o micrófono del PC que el móvil quiere recibir en la señal [stream] (1-255; la 0 es la pantalla). */
+struct Subscription {
+    uint8_t stream = 0;
+    std::wstring deviceId;
 };
 
 /** Envía «SGL1?» por difusión y a cada equipo de la red local, y recoge las respuestas durante [timeoutMs]. */
@@ -45,12 +55,19 @@ public:
     void Close();
     bool IsConnected() const { return connected_; }
 
+    // Señal 0: la pantalla y el sonido del PC. Las demás, cámaras y micrófonos que pide el móvil
     void SendVideoFormat(uint32_t width, uint32_t height, uint32_t fps);
     void SendVideoFrame(const uint8_t* data, size_t size, bool keyframe, int64_t captureUs);
     void SendAudio(const int16_t* pcm, size_t frames, uint32_t sampleRate, uint32_t channels, int64_t captureUs);
+    void SendDeviceList(const std::vector<PcDevice>& devices);
+    void SendStreamVideoFormat(uint8_t stream, uint32_t width, uint32_t height, uint32_t fps);
+    void SendStreamVideoFrame(uint8_t stream, const uint8_t* data, size_t size, bool keyframe, int64_t captureUs);
+    void SendStreamAudio(uint8_t stream, const int16_t* pcm, size_t frames, uint32_t sampleRate, uint32_t channels, int64_t captureUs);
 
-    /** El móvil necesita un fotograma clave (decodificador nuevo o fotogramas perdidos). */
-    std::function<void()> onKeyframeRequest;
+    /** El móvil necesita un fotograma clave de la señal [stream] (decodificador nuevo o fotogramas perdidos). */
+    std::function<void(uint8_t stream)> onKeyframeRequest;
+    /** El móvil cambió las cámaras y micrófonos que quiere: la lista completa. */
+    std::function<void(std::vector<Subscription>)> onSubscribe;
     /** La conexión se cerró sin llamar a Close(). */
     std::function<void()> onDisconnected;
 
@@ -65,6 +82,7 @@ private:
         std::vector<uint8_t> data;
         bool video = false;
         bool keyframe = false;
+        uint8_t stream = 0;
     };
 
     void Enqueue(Packet&& packet);
@@ -82,8 +100,8 @@ private:
     std::mutex queueMutex_;
     std::condition_variable queueSignal_;
     std::deque<Packet> queue_;
-    size_t queuedVideoFrames_ = 0;
-    bool dropUntilKeyframe_ = false;
+    std::array<uint16_t, 256> queuedVideoFrames_{};
+    std::array<bool, 256> dropUntilKeyframe_{};
     std::mutex sendMutex_;
     std::atomic<uint64_t> sentBytes_{0};
     std::atomic<int> latencyMs_{-1};

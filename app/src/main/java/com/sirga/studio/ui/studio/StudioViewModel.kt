@@ -21,6 +21,8 @@ import com.sirga.studio.engine.model.SourceKind
 import com.sirga.studio.engine.model.Transform
 import com.sirga.studio.engine.model.kind
 import com.sirga.studio.engine.pclink.PcLinkAddresses
+import com.sirga.studio.engine.pclink.PcDeviceKind
+import com.sirga.studio.engine.pclink.PcDevice
 import com.sirga.studio.engine.render.PreviewSlot
 import com.sirga.studio.engine.service.StudioService
 import com.sirga.studio.engine.settings.StudioSettings
@@ -47,6 +49,11 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     val monitorStatus = engine.audio.monitorStatus
     val sourceStatus = engine.compositor.sourceStatus
     val pcLinkStatus = engine.pcLink.statuses
+    val pcDevices = engine.pcLink.devices
+
+    private val _pcPicker = MutableStateFlow<PcDeviceKind?>(null)
+    /** Selector abierto de cámara o micrófono del PC. */
+    val pcPicker: StateFlow<PcDeviceKind?> = _pcPicker.asStateFlow()
     val cameras = engine.devices.cameras
     val usbCameras = engine.devices.usbCameras
     val audioInputs = engine.devices.inputs
@@ -109,6 +116,10 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
     // ---- Fuentes -------------------------------------------------------------------------
 
     fun addSource(kind: SourceKind) {
+        if (kind == SourceKind.PcCamera || kind == SourceKind.PcMicrophone) {
+            _pcPicker.value = if (kind == SourceKind.PcCamera) PcDeviceKind.Camera else PcDeviceKind.Microphone
+            return
+        }
         if (kind == SourceKind.PcInput) {
             // Comprobar qué puertos se pueden abrir toca la red: fuera del hilo principal
             val taken = state.value.sources.values.filterIsInstance<Source.PcInput>().map { it.port }.toSet()
@@ -132,6 +143,7 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
             SourceKind.Camera -> Source.Camera(id, name, Facing.Back)
             SourceKind.UsbCamera -> Source.UsbCamera(id, name)
             SourceKind.PcInput -> Source.PcInput(id, name, port = pcPort)
+            SourceKind.PcCamera, SourceKind.PcMicrophone -> return // se añaden desde el selector de dispositivos del PC
             SourceKind.Screen -> Source.Screen(id, name)
             SourceKind.Image -> return // se añade tras elegir la imagen
             SourceKind.Text -> Source.Text(id, name, text = "Texto nuevo", backgroundArgb = 0x99000000)
@@ -146,6 +158,22 @@ class StudioViewModel(application: Application) : AndroidViewModel(application) 
         studio.addSource(source, transform)
         _dockTab.value = if (source.hasVideo) DockTab.Sources else DockTab.Mixer
         if (source.hasVideo) _propertiesFor.value = source.id
+    }
+
+    fun closePcPicker() { _pcPicker.value = null }
+
+    /** Añade una cámara o un micrófono del PC como fuente, por la conexión de la fuente PC [pcSourceId]. */
+    fun addPcDevice(pcSourceId: String, device: PcDevice) {
+        _pcPicker.value = null
+        val id = UUID.randomUUID().toString()
+        val source = when (device.kind) {
+            PcDeviceKind.Camera -> Source.PcCamera(id, device.name, pcSourceId, device.id, device.name)
+            PcDeviceKind.Microphone -> Source.PcMicrophone(id, device.name, pcSourceId, device.id, device.name)
+        }
+        // Una webcam suele ir en una esquina, encima del juego
+        val transform = if (device.kind == PcDeviceKind.Camera) Transform(x = 0.72f, y = 0.66f, width = 0.26f, height = 0.30f) else Transform.FullCanvas
+        studio.addSource(source, transform)
+        _dockTab.value = if (source.hasVideo) DockTab.Sources else DockTab.Mixer
     }
 
     /** Copia la imagen elegida al almacenamiento privado: los permisos del selector caducan. */

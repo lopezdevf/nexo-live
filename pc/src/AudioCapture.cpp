@@ -12,9 +12,10 @@ namespace sirga {
 
 AudioCapture::~AudioCapture() { Stop(); }
 
-void AudioCapture::Start(Callback onAudio) {
+void AudioCapture::Start(Callback onAudio, const std::wstring& microphoneId) {
     Stop();
     onAudio_ = std::move(onAudio);
+    microphoneId_ = microphoneId;
     running_ = true;
     thread_ = std::thread([this] { Loop(); });
 }
@@ -38,7 +39,12 @@ void AudioCapture::Loop() {
         wchar_t* deviceId = nullptr;
         try {
             enumerator = winrt::create_instance<IMMDeviceEnumerator>(__uuidof(MMDeviceEnumerator));
-            winrt::check_hresult(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, device.put()));
+            bool microphone = !microphoneId_.empty();
+            if (microphone) {
+                winrt::check_hresult(enumerator->GetDevice(microphoneId_.c_str(), device.put()));
+            } else {
+                winrt::check_hresult(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, device.put()));
+            }
             device->GetId(&deviceId);
             winrt::check_hresult(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.put_void()));
 
@@ -50,12 +56,12 @@ void AudioCapture::Loop() {
             format.nBlockAlign = format.nChannels * format.wBitsPerSample / 8;
             format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
             // Windows convierte lo que suene (44,1 kHz, 5.1, flotante…) al formato que pide el móvil
-            winrt::check_hresult(client->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                                    AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-                                                    1'000'000, 0, &format, nullptr));
+            DWORD flags = AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+            if (!microphone) flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
+            winrt::check_hresult(client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 1'000'000, 0, &format, nullptr));
             winrt::check_hresult(client->GetService(__uuidof(IAudioCaptureClient), capture.put_void()));
             winrt::check_hresult(client->Start());
-            Log(L"Audio del PC capturado");
+            Log(microphone ? L"Micrófono del PC capturado" : L"Audio del PC capturado");
         } catch (const winrt::hresult_error& e) {
             Log(L"No se pudo capturar el audio: %s", e.message().c_str());
             CoTaskMemFree(deviceId);
@@ -89,7 +95,7 @@ void AudioCapture::Loop() {
             if (hr == AUDCLNT_E_DEVICE_INVALIDATED || FAILED(hr)) restart = true;
 
             // Cada segundo: si cambió la salida predeterminada, se sigue a la nueva
-            if (++checks >= 200) {
+            if (microphoneId_.empty() && ++checks >= 200) {
                 checks = 0;
                 winrt::com_ptr<IMMDevice> current;
                 wchar_t* currentId = nullptr;

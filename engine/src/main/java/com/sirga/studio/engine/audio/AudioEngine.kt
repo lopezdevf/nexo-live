@@ -27,6 +27,8 @@ import com.sirga.studio.engine.model.MonitoringMode
 import com.sirga.studio.engine.model.Source
 import com.sirga.studio.engine.pclink.PcLinkHub
 import com.sirga.studio.engine.pclink.PcLinkReceiver
+import com.sirga.studio.engine.pclink.PcDeviceStream
+import com.sirga.studio.engine.pclink.PcDeviceKind
 import com.sirga.studio.engine.settings.StudioSettings
 import com.sirga.studio.engine.studio.StudioController
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -211,6 +213,9 @@ class AudioEngine(
         private var effects = mutableListOf<android.media.audiofx.AudioEffect>()
 
         private var pcReceiver: PcLinkReceiver? = null
+        /** Fuente PC cuyo receptor se tomó prestado (la propia o la de un micrófono del PC). */
+        private var pcSourceId: String? = null
+        private var pcStream: PcDeviceStream? = null
 
         @SuppressLint("MissingPermission")
         fun open(): Boolean {
@@ -220,6 +225,23 @@ class AudioEngine(
                 receiver.targetSampleRate = sampleRate
                 receiver.audioListener = { pcm -> ring.write(pcm, pcm.size) }
                 pcReceiver = receiver
+                pcSourceId = source.id
+                alive = true
+                return true
+            }
+            if (source is Source.PcMicrophone) {
+                // El micrófono del PC llega en su propia señal por la conexión de su fuente PC
+                val pc = studio.state.value.sources[source.pcSourceId] as? Source.PcInput
+                if (pc == null) {
+                    fail("Falta la fuente «PC» por la que llega este micrófono")
+                    return false
+                }
+                val receiver = pcLink.acquire(pc)
+                val stream = receiver.openStream(PcDeviceKind.Microphone, source.deviceId, source.deviceName)
+                receiver.setStreamAudio(stream, sampleRate) { pcm -> ring.write(pcm, pcm.size) }
+                pcReceiver = receiver
+                pcSourceId = pc.id
+                pcStream = stream
                 alive = true
                 return true
             }
@@ -332,11 +354,19 @@ class AudioEngine(
 
         fun stop() {
             alive = false
-            pcReceiver?.let {
-                it.audioListener = null
-                pcLink.release(source.id, it)
+            pcReceiver?.let { receiver ->
+                val stream = pcStream
+                if (stream != null) {
+                    receiver.setStreamAudio(stream, sampleRate, null)
+                    receiver.closeStream(stream)
+                } else {
+                    receiver.audioListener = null
+                }
+                pcLink.release(pcSourceId ?: source.id, receiver)
             }
             pcReceiver = null
+            pcStream = null
+            pcSourceId = null
             runCatching { record?.stop() }
             thread?.join(500)
             effects.forEach { runCatching { it.release() } }
